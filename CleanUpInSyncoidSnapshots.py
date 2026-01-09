@@ -470,6 +470,8 @@ def main():
             print_separator(logger)
             logger.info("Starting snapshot creation...")
 
+            print_separator(logger)
+
             for dataset in datasets:
                 print_separator(logger)
                 create_snapshot(logger, error_logger, dataset, prefix)
@@ -482,9 +484,11 @@ def main():
         elif args.command == 'delete':
             print_separator(logger)
             logger.info("Starting snapshot deletion...")
+            print_separator(logger)
 
             for dataset in datasets:
                 delete_old_snapshots(logger, error_logger, dataset, prefix, older_than, retain_count)
+                print_separator(logger)
 
             print_separator(logger)
             logger.info("Snapshot deletion completed.")
