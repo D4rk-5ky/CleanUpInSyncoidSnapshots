@@ -64,11 +64,11 @@ def setup_logger(log_folder: str, log_date: str, prefix: str) -> Tuple[logging.L
     return logger, error_logger, err_filepath
 
 
-def pick_log_folder(script_log_folder: str, tmp_name: str = "SnapBeforeWatchTower") -> str:
+def pick_log_folder(script_log_folder: str, tmp_name: str) -> str:
     """
-    Policy:
-      - If NOT root: always use /tmp/<tmp_name>
-      - If root: try <script>/logs; if not writable, fall back to /tmp/<tmp_name>
+    Log folder selection policy:
+      1) Prefer <script_dir>/logs if it is writable or can be created (root OR non-root)
+      2) Fall back to /tmp/<tmp_name>
     """
     tmp_folder = os.path.join(tempfile.gettempdir(), tmp_name)
 
@@ -83,15 +83,19 @@ def pick_log_folder(script_log_folder: str, tmp_name: str = "SnapBeforeWatchTowe
         except Exception:
             return False
 
-    if os.geteuid() != 0:
-        os.makedirs(tmp_folder, exist_ok=True)
-        return tmp_folder
-
     if _ensure_writable(script_log_folder):
         return script_log_folder
 
     os.makedirs(tmp_folder, exist_ok=True)
     return tmp_folder
+
+
+
+def script_base_name() -> str:
+    """Return script name without extension, safe for filenames."""
+    base = os.path.splitext(os.path.basename(__file__))[0]
+    # Replace spaces or weird chars just in case
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", base)
 
 
 class CommandError(RuntimeError):
@@ -149,8 +153,6 @@ def run_cmd(
 
     return proc
 
-
-
 def get_newest_files(log_dir: str, prefix: str):
     files = glob.glob(os.path.join(log_dir, f"{prefix}*"))
     files.sort(key=os.path.getmtime, reverse=True)
@@ -168,6 +170,18 @@ def get_newest_files(log_dir: str, prefix: str):
             break
 
     return newest_log, newest_err
+
+
+def read_hostnames(path: str) -> List[str]:
+    """Read hostnames (one per line), ignoring blanks and # comments."""
+    with open(path, "r", encoding="utf-8") as f:
+        out: List[str] = []
+        for ln in f.read().splitlines():
+            ln = ln.strip()
+            if not ln or ln.startswith("#"):
+                continue
+            out.append(ln)
+    return out
 
 
 def send_mail(subject, body, recipient, attachment_files=None):
@@ -189,6 +203,9 @@ def print_separator(logger, error_logger=None):
     else:
         logger.info(separator)
 
+
+def log_blank_line(logger: logging.Logger):
+    logger.info("")
 
 def WasMailSent(logger, error_logger, MailExitCode, popenstderr):
     if MailExitCode == 0:
@@ -235,6 +252,137 @@ def MailTo(logger, error_logger, recipient, log_folder: str, prefix: str):
         WasMailSent(logger, error_logger, mail_exit_code, stderr_output)
 
 
+def parse_syncoid_ts(ts: str) -> datetime.datetime:
+    """
+    Parse: YYYY-MM-DD:HH:MM:SS-GMT(+|-)HH:MM
+    Examples:
+      2023-09-09:15:34:26-GMT02:00   (treated as +02:00)
+      2023-09-09:15:34:26-GMT-01:00
+    """
+    m = re.match(
+        r"^(?P<date>\d{4}-\d{2}-\d{2}):(?P<time>\d{2}:\d{2}:\d{2})-GMT(?P<off>[+-]?\d{2}:\d{2})$",
+        ts,
+    )
+    if not m:
+        raise ValueError(f"Invalid syncoid timestamp: {ts}")
+
+    dt_part = f"{m.group('date')} {m.group('time')}"
+    dt = datetime.datetime.strptime(dt_part, "%Y-%m-%d %H:%M:%S")
+
+    off = m.group("off")
+    # If syncoid writes "GMT02:00" (no sign), treat as +02:00
+    if off[0] not in "+-":
+        off = "+" + off
+
+    sign = 1 if off[0] == "+" else -1
+    hh = int(off[1:3])
+    mm = int(off[4:6])
+    tz = datetime.timezone(sign * datetime.timedelta(hours=hh, minutes=mm))
+
+    return dt.replace(tzinfo=tz)
+
+
+def delete_syncoid_snapshots(
+    logger: logging.Logger,
+    error_logger: logging.Logger,
+    dataset: str,
+    hostnames: List[str],
+    older_than: Optional[datetime.timedelta],
+    retain_count: int,
+    dry_run: bool,
+) -> None:
+    if not hostnames:
+        logger.info(f"[{dataset}] No hostnames provided. Skipping syncoid pruning.")
+        return
+
+    # Build one regex that matches any hostname in the list
+    # <dataset>@syncoid_<hostname>_<timestamp>
+    host_alt = "|".join(re.escape(h) for h in hostnames)
+    snap_regex = re.compile(
+        rf"^(?P<full>.+)@syncoid_(?P<host>{host_alt})_(?P<ts>\d{{4}}-\d{{2}}-\d{{2}}:\d{{2}}:\d{{2}}:\d{{2}}-GMT[+-]?\d{{2}}:\d{{2}})$"
+    )
+
+    proc = run_cmd(
+        ["zfs", "list", "-H", "-t", "snapshot", "-o", "name", dataset],
+        logger=logger,
+        error_logger=error_logger,
+        check=True,
+    )
+    lines = [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()]
+    if not lines:
+        return
+
+    # Group snapshots by hostname
+    by_host: dict[str, list[tuple[datetime.datetime, str]]] = {h: [] for h in hostnames}
+
+    for s in lines:
+        m = snap_regex.match(s)
+        if not m:
+            continue
+        host = m.group("host")
+        ts_str = m.group("ts")
+        try:
+            ts = parse_syncoid_ts(ts_str)
+        except Exception as e:
+            error_logger.error(f"Skipping snapshot with bad syncoid timestamp: {s} ({e})")
+            continue
+        by_host.setdefault(host, []).append((ts, s))
+
+    # Decide deletions per host
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    cutoff_utc = (now_utc - older_than) if older_than else None
+
+    total_delete = 0
+
+    for host, snaps in by_host.items():
+        if not snaps:
+            continue
+
+        # Newest first
+        snaps.sort(key=lambda x: x[0].astimezone(datetime.timezone.utc), reverse=True)
+
+        keep_set = set()
+        if retain_count > 0:
+            keep_set = set(s for _, s in snaps[:retain_count])
+
+        if cutoff_utc is not None:
+            to_delete = [
+                s for ts, s in snaps
+                if (s not in keep_set and ts.astimezone(datetime.timezone.utc) < cutoff_utc)
+            ]
+            logger.info(
+                f"[{dataset}] host={host} matched={len(snaps)} retain={retain_count} cutoff_utc={cutoff_utc.isoformat()} delete={len(to_delete)}"
+            )
+        else:
+            # retain-only: delete all except keep_set
+            to_delete = [s for _, s in snaps if s not in keep_set]
+            logger.info(
+                f"[{dataset}] host={host} matched={len(snaps)} retain={retain_count} (no cutoff) delete={len(to_delete)}"
+            )
+
+        log_blank_line(logger)
+
+        for snap_name in to_delete:
+            if dry_run:
+                logger.info(f"[DRY-RUN] Would delete syncoid snapshot: {snap_name}")
+            else:
+                run_cmd(
+                    ["zfs", "destroy", snap_name],
+                    logger=logger,
+                    error_logger=error_logger,
+                    check=True,
+                )
+                logger.info(f"[{dataset}] Deleted syncoid snapshot: {snap_name}")
+
+        total_delete += len(to_delete)
+
+    if dry_run:
+        log_blank_line(logger)
+        logger.info(f"[{dataset}] DRY-RUN complete. Snapshots that WOULD be deleted: {total_delete}")
+    else:
+        log_blank_line(logger)
+        logger.info(f"[{dataset}] Syncoid pruning done. Deleted total: {total_delete}")
+
 def parse_older_than(value: str) -> datetime.timedelta:
     pattern = r'^(\d+)([dwm])$'
     match = re.match(pattern, value)
@@ -253,103 +401,6 @@ def parse_older_than(value: str) -> datetime.timedelta:
     raise argparse.ArgumentTypeError("Invalid value for --older-than. Use format 'Nd', 'Nw', or 'Nm' (N=integer).")
 
 
-def create_snapshot(
-    logger: logging.Logger,
-    error_logger: logging.Logger,
-    dataset: str,
-    prefix: str,
-):
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M_%S")
-    snapshot_name = f"{prefix}-Date-{timestamp}"
-    full_snapshot_name = f"{dataset}@{snapshot_name}"
-
-    logger.info(f"Creating snapshot of: {dataset}")
-    logger.debug(f"Full snapshot name: {full_snapshot_name}")
-
-    try:
-        run_cmd(
-            ["zfs", "snapshot", full_snapshot_name],
-            logger=logger,
-            error_logger=error_logger,
-            check=True,
-        )
-    except CommandError:
-        print_separator(logger, error_logger)
-        error_logger.error(
-            f"Error creating snapshot of {dataset} (snapshot: {full_snapshot_name})"
-        )
-        raise
-
-def delete_old_snapshots(
-    logger: logging.Logger,
-    error_logger: logging.Logger,
-    dataset: str,
-    prefix: str,
-    older_than: Optional[datetime.timedelta],
-    retain_count: int,
-) -> None:
-    """
-    Deletion rules:
-      - If retain_count > 0: always keep newest retain_count.
-      - If older_than is provided: delete snapshots older than cutoff (but never delete kept ones).
-      - If older_than is NOT provided: delete everything not in keep_set (retain-only pruning).
-      - If older_than is None AND retain_count == 0: do nothing.
-    """
-    if older_than is None and retain_count <= 0:
-        logger.info(f"[{dataset}] No pruning configured (no --older-than and retain_count=0). Skipping.")
-        return
-
-    # Match: <dataset>@<prefix>-Date-YYYY-MM-DD_HH_MM_SS
-    snap_regex = re.compile(
-        rf"^(?P<full>.+)@{re.escape(prefix)}-Date-?(?P<ts>\d{{4}}-\d{{2}}-\d{{2}}_\d{{2}}_\d{{2}}_\d{{2}})$"
-    )
-
-    proc = run_cmd(["zfs", "list", "-H", "-t", "snapshot", "-o", "name", dataset], logger, error_logger, check=True)
-    lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
-    if not lines:
-        return
-
-    snaps: List[Tuple[datetime.datetime, str]] = []
-    for s in lines:
-        m = snap_regex.match(s)
-        if not m:
-            continue
-        ts_str = m.group("ts")
-        try:
-            ts = datetime.datetime.strptime(ts_str, "%Y-%m-%d_%H_%M_%S")
-        except ValueError as e:
-            error_logger.error(f"Skipping snapshot with unparseable timestamp: {s} ({e})")
-            continue
-        snaps.append((ts, s))
-
-    if not snaps:
-        return
-
-    snaps.sort(key=lambda x: x[0], reverse=True)
-
-    keep_set = set()
-    if retain_count > 0:
-        keep_set = set(s for _, s in snaps[:retain_count])
-
-    # Decide deletions
-    if older_than is not None:
-        cutoff = datetime.datetime.now() - older_than
-        to_delete = [s for ts, s in snaps if (s not in keep_set and ts < cutoff)]
-        logger.info(f"[{dataset}] Found {len(snaps)} matching snapshots (retain_count={retain_count}).")
-        logger.info(f"[{dataset}] Cutoff time: {cutoff.strftime('%Y-%m-%d %H:%M:%S')}  (older_than={older_than})")
-    else:
-        # retain-only: delete everything not in keep_set
-        to_delete = [s for _, s in snaps if (s not in keep_set)]
-        logger.info(f"[{dataset}] Found {len(snaps)} matching snapshots (retain_count={retain_count}).")
-        logger.info(f"[{dataset}] No cutoff (--older-than not set). Retain-only pruning enabled.")
-
-    logger.info(f"[{dataset}] Will delete {len(to_delete)} snapshot(s).")
-
-    for snap_name in to_delete:
-        run_cmd(["zfs", "destroy", snap_name], logger=logger, error_logger=error_logger, check=True)
-        logger.info(f"[{dataset}] Deleted snapshot: {snap_name}")
-
-
 def delete_old_files(
     logger: logging.Logger,
     error_logger: logging.Logger,
@@ -357,6 +408,7 @@ def delete_old_files(
     prefix: str,
     older_than: Optional[datetime.timedelta],
     retain_count: int,
+    dry_run: bool,
 ) -> None:
     """
     Log deletion rules mirror snapshot pruning:
@@ -406,35 +458,58 @@ def delete_old_files(
     for d in eligible:
         for filename in files_by_ts.get(d, []):
             path_to_file = os.path.join(log_folder, filename)
-            try:
-                os.remove(path_to_file)
-                logger.info(f"Deleted file: {filename}")
-            except Exception as e:
-                error_logger.error(f"Failed to delete file: {filename}. Error: {e}")
+            if dry_run:
+                logger.info(f"[DRY-RUN] Would delete log file: {filename}")
+            else:
+                try:
+                    os.remove(path_to_file)
+                    logger.info(f"Deleted file: {filename}")
+                except Exception as e:
+                    error_logger.error(f"Failed to delete file: {filename}. Error: {e}")
 
+def script_base_name() -> str:
+    base = os.path.splitext(os.path.basename(__file__))[0]
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", base)
 
 def main():
-    parser = argparse.ArgumentParser(description='Create or delete snapshots for ZFS datasets.')
-    parser.add_argument('-c', '--command', choices=['create', 'delete'], required=True, help='Command: create or delete')
-    parser.add_argument('-f', '--file', required=True, help='Path to the file containing the dataset names')
+    # Get scripts name
+    default_script_name = script_base_name()
+    
+    # Argument parsing
+    parser = argparse.ArgumentParser(
+        description="Delete syncoid snapshots for ZFS datasets (delete-only)."
+    )
 
+    # Required arguments
+    parser.add_argument('-c', '--command', choices=['delete', 'dry-run'], required=True, 
+                        help='Command: delete')
+    
+    parser.add_argument('-f', '--datasets-file', required=True, 
+                        help='Path to the file containing the dataset names')
+    
+    # NEW: syncoid hosts file
+    parser.add_argument('-s', "--syncoid-hosts-file", required=True, 
+                        help="File containing hostnames (one per line) to match syncoid_<hostname>_* snapshots")
+    
     # NEW: optional older-than
-    parser.add_argument('--older-than', type=parse_older_than, required=False,
+    parser.add_argument('-o', '--older-than', type=parse_older_than, required=False,
                         help="Delete snapshots/logs older than 'Nd', 'Nw', or 'Nm' (N=integer)")
 
     # NEW: optional retain-count (default 0)
-    parser.add_argument('--retain-count', type=int, default=0,
+    parser.add_argument('-r', '--retain-count', type=int, default=0,
                         help='Number of newest snapshots/log groups to retain (default: 0)')
 
     # NEW: custom snapshot/log prefix
-    parser.add_argument('--snap-name', default="SnapBeforeWatchTower",
-                        help="Snapshot/log prefix. Timestamp will be appended as '<snap-name>-Date-YYYY-MM-DD_HH_MM_SS'")
+    parser.add_argument('-l', "--log-prefix", default=default_script_name, 
+                        help="Prefix used for log file names (default: script filename)")
 
-    parser.add_argument('--send-mail', metavar='EMAIL', help='Send an email notification to the specified email address')
+    # NEW: send email notification
+    parser.add_argument('-m', '--send-mail', metavar='EMAIL', 
+                        help='Send an email notification to the specified email address')
 
     args = parser.parse_args()
 
-    prefix = args.snap_name
+    prefix = args.log_prefix
     retain_count = max(int(args.retain_count or 0), 0)
     older_than = args.older_than  # Optional[datetime.timedelta]
 
@@ -442,7 +517,9 @@ def main():
 
     SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
     preferred_log_folder = os.path.join(SCRIPT_DIR, "logs")
-    log_folder = pick_log_folder(preferred_log_folder)
+    
+    # tmp fallback folder also uses script name (unique per script)
+    log_folder = pick_log_folder(preferred_log_folder, tmp_name=default_script_name)
 
     logger, error_logger, err_filepath = setup_logger(log_folder, log_date, prefix)
 
@@ -461,25 +538,27 @@ def main():
 
         sys.exit(1)
 
-    with open(args.file, "r", encoding="utf-8") as file:
+    # Read datasets from file
+    with open(args.datasets_file, "r", encoding="utf-8") as file:
         datasets = [ln.strip() for ln in file.read().splitlines() if ln.strip()]
 
+    # Read syncoid hostnames if provided
+    syncoid_hosts = []
+    if args.syncoid_hosts_file:
+        syncoid_hosts = read_hostnames(args.syncoid_hosts_file)
+
+    dry_run = args.dry_run = (args.command == 'dry-run')
+
     try:
-        if args.command == 'create':
-
-            print_separator(logger)
-            logger.info("Starting snapshot creation...")
-
-            print_separator(logger)
-
+        if args.command == 'dry-run':
             for dataset in datasets:
+                delete_syncoid_snapshots(logger, error_logger, dataset, syncoid_hosts, older_than, retain_count, dry_run)
                 print_separator(logger)
-                create_snapshot(logger, error_logger, dataset, prefix)
-                delete_old_snapshots(logger, error_logger, dataset, prefix, older_than, retain_count)
+            print_separator(logger)
 
             print_separator(logger)
-            logger.info("Snapshot creation completed.")
-            delete_old_files(logger, error_logger, log_folder, prefix, older_than, retain_count)
+            logger.info("Snapshot dry-run completed.")
+            delete_old_files(logger, error_logger, log_folder, prefix, older_than, retain_count, dry_run)
 
         elif args.command == 'delete':
             print_separator(logger)
@@ -487,12 +566,12 @@ def main():
             print_separator(logger)
 
             for dataset in datasets:
-                delete_old_snapshots(logger, error_logger, dataset, prefix, older_than, retain_count)
+                delete_syncoid_snapshots(logger, error_logger, dataset, syncoid_hosts, older_than, retain_count, dry_run)
                 print_separator(logger)
 
             print_separator(logger)
             logger.info("Snapshot deletion completed.")
-            delete_old_files(logger, error_logger, log_folder, prefix, older_than, retain_count)
+            delete_old_files(logger, error_logger, log_folder, prefix, older_than, retain_count, dry_run)
 
     except Exception as e:
         error_logger.error(f"Fatal error: {e}")
