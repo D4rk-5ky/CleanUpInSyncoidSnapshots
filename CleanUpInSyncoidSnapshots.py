@@ -230,7 +230,7 @@ def MailTo(
     subject: str,
     intro: str = "",
 ):
-    logger.info("")  # blank line
+    log_blank_line(logger)
     logger.info("Preparing email report...")
 
     newest_log, newest_err = get_newest_files(log_folder, prefix)
@@ -338,9 +338,16 @@ def delete_syncoid_snapshots(
 
     total_delete = 0
 
+    first_host_printed = True
+
     for host, snaps in by_host.items():
         if not snaps:
             continue
+        
+        # Print a blank line between hosts
+        if not first_host_printed:
+            logger.info("")
+        first_host_printed = False
 
         # Newest first
         snaps.sort(key=lambda x: x[0].astimezone(datetime.timezone.utc), reverse=True)
@@ -364,8 +371,9 @@ def delete_syncoid_snapshots(
                 f"[{dataset}] host={host} matched={len(snaps)} retain={retain_count} (no cutoff) delete={len(to_delete)}"
             )
 
-        log_blank_line(logger)
-
+        if to_delete:
+            log_blank_line(logger)
+        
         for snap_name in to_delete:
             if dry_run:
                 logger.info(f"[DRY-RUN] Would delete syncoid snapshot: {snap_name}")
