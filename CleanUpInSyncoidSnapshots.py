@@ -221,35 +221,39 @@ def WasMailSent(logger, error_logger, MailExitCode, popenstderr):
         error_logger.error('----------')
 
 
-def MailTo(logger, error_logger, recipient, log_folder: str, prefix: str):
-    print_separator(logger)
-    logger.info('There is an option to send a mail')
-
-    subject = "Error snapshotting or cleaning up snapshots/logs - attaching logs"
+def MailTo(
+    logger,
+    error_logger,
+    recipient,
+    log_folder: str,
+    prefix: str,
+    subject: str,
+    intro: str = "",
+):
+    logger.info("")  # blank line
+    logger.info("Preparing email report...")
 
     newest_log, newest_err = get_newest_files(log_folder, prefix)
     attachment_files = []
     body = ""
 
-    if newest_log:
-        attachment_files.append(newest_log)
-    if newest_err:
-        attachment_files.append(newest_err)
+    if intro:
+        body += intro.strip() + "\n\n"
 
-    if newest_err and os.path.isfile(newest_err):
+    if newest_err and os.path.isfile(newest_err) and os.path.getsize(newest_err) > 0:
+        attachment_files.append(newest_err)
         with open(newest_err, 'r', encoding="utf-8") as err_file:
             body += "----------\n\n.err file\n" + err_file.read()
 
-    if newest_log and os.path.isfile(newest_log):
-        with open(newest_log, 'r', encoding="utf-8") as log_file:
-            body += "----------\n\n.log file\n" + log_file.read()
+    if newest_log:
+        attachment_files.append(newest_log)
+        if os.path.isfile(newest_log):
+            with open(newest_log, 'r', encoding="utf-8") as log_file:
+                body += "----------\n\n.log file\n" + log_file.read()
 
     mail_exit_code, stderr_output = send_mail(subject, body, recipient, attachment_files)
+    WasMailSent(logger, error_logger, mail_exit_code, stderr_output)
 
-    if mail_exit_code == 0:
-        WasMailSent(logger, error_logger, 0, "")
-    else:
-        WasMailSent(logger, error_logger, mail_exit_code, stderr_output)
 
 
 def parse_syncoid_ts(ts: str) -> datetime.datetime:
@@ -558,7 +562,6 @@ def main():
 
             print_separator(logger)
             logger.info("Snapshot dry-run completed.")
-            delete_old_files(logger, error_logger, log_folder, prefix, older_than, retain_count, dry_run)
 
         elif args.command == 'delete':
             print_separator(logger)
@@ -571,15 +574,32 @@ def main():
 
             print_separator(logger)
             logger.info("Snapshot deletion completed.")
-            delete_old_files(logger, error_logger, log_folder, prefix, older_than, retain_count, dry_run)
+
+        if args.send_mail:
+            MailTo(
+                logger,
+                error_logger,
+                recipient=args.send_mail,
+                log_folder=log_folder,
+                prefix=prefix,
+                subject="Syncoid cleanup SUCCESS - logs attached",
+                intro="Cleanup completed successfully. Logs attached.",
+            )
+        
+        delete_old_files(logger, error_logger, log_folder, prefix, older_than, retain_count, dry_run)
 
     except Exception as e:
         error_logger.error(f"Fatal error: {e}")
-        try:
-            if args.send_mail:
-                MailTo(logger, error_logger, recipient=args.send_mail, log_folder=log_folder, prefix=prefix)
-        except Exception as mail_e:
-            error_logger.error(f"Additionally failed to send mail: {mail_e}")
+        if args.send_mail:
+            MailTo(
+                logger,
+                error_logger,
+                recipient=args.send_mail,
+                log_folder=log_folder,
+                prefix=prefix,
+                subject="Syncoid cleanup FAILED - logs attached",
+                intro=f"Cleanup failed with error: {e}",
+            )
         raise
 
     finally:
