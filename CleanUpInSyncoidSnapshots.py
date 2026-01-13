@@ -488,7 +488,7 @@ def main():
     parser.add_argument('-c', '--command', choices=['delete', 'dry-run'], required=True, 
                         help='Command: delete')
     
-    parser.add_argument('-f', '--datasets-file', required=True, 
+    parser.add_argument('-d', '--datasets-file', required=True, 
                         help='Path to the file containing the dataset names')
     
     # NEW: syncoid hosts file
@@ -511,6 +511,13 @@ def main():
     parser.add_argument('-m', '--send-mail', metavar='EMAIL', 
                         help='Send an email notification to the specified email address')
 
+    parser.add_argument(
+        "-mos",
+        "--mail-on-success",
+        action="store_true",
+        help="Also send email when the run completes successfully (default: mail on error only)",
+    )
+    
     args = parser.parse_args()
 
     prefix = args.log_prefix
@@ -553,6 +560,8 @@ def main():
 
     dry_run = args.dry_run = (args.command == 'dry-run')
 
+    success = False
+
     try:
         if args.command == 'dry-run':
             for dataset in datasets:
@@ -574,8 +583,27 @@ def main():
 
             print_separator(logger)
             logger.info("Snapshot deletion completed.")
+        
+        success = True
 
-        if args.send_mail:
+    except Exception as e:
+        error_logger.error(f"Fatal error: {e}")
+        raise
+
+    finally:
+        if args.send_mail and not success:
+            MailTo(
+                logger,
+                error_logger,
+                recipient=args.send_mail,
+                log_folder=log_folder,
+                prefix=prefix,
+                subject="Syncoid cleanup FAILED - logs attached",
+                intro="Cleanup failed. See attached logs.",
+            )
+
+        # Send mail on SUCCESS only if explicitly requested
+        elif args.send_mail and success and args.mail_on_success:
             MailTo(
                 logger,
                 error_logger,
@@ -585,24 +613,11 @@ def main():
                 subject="Syncoid cleanup SUCCESS - logs attached",
                 intro="Cleanup completed successfully. Logs attached.",
             )
-        
-        delete_old_files(logger, error_logger, log_folder, prefix, older_than, retain_count, dry_run)
 
-    except Exception as e:
-        error_logger.error(f"Fatal error: {e}")
-        if args.send_mail:
-            MailTo(
-                logger,
-                error_logger,
-                recipient=args.send_mail,
-                log_folder=log_folder,
-                prefix=prefix,
-                subject="Syncoid cleanup FAILED - logs attached",
-                intro=f"Cleanup failed with error: {e}",
-            )
-        raise
+        if success:
+            delete_old_files(logger, error_logger, log_folder, prefix, older_than, retain_count, dry_run)
 
-    finally:
+        # Clean up empty .err file
         if os.path.exists(err_filepath) and os.path.getsize(err_filepath) == 0:
             os.remove(err_filepath)
 
