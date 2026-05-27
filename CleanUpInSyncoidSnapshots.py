@@ -185,10 +185,17 @@ def read_hostnames(path: str) -> List[str]:
 
 
 def send_mail(subject, body, recipient, attachment_files=None):
-    mail_command = ['mail', '-s', subject, recipient]
+    # Put all options before the recipient. This is more compatible with mail/mailx variants.
+    mail_command = ['mail', '-s', subject]
+
     if attachment_files:
         for file in attachment_files:
             mail_command.extend(['--attach', file])
+
+    mail_command.append(recipient)
+
+    if not body:
+        body = "No mail body was generated. Check attached logs.\n"
 
     process = subprocess.Popen(mail_command, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     _, stderr_output = process.communicate(input=body.encode())
@@ -227,7 +234,7 @@ def MailTo(
     recipient,
     log_folder: str,
     prefix: str,
-    subject: str,
+    subject: str = "Syncoid cleanup report - logs attached",
     intro: str = "",
 ):
     log_blank_line(logger)
@@ -248,8 +255,11 @@ def MailTo(
     if newest_log:
         attachment_files.append(newest_log)
         if os.path.isfile(newest_log):
-            with open(newest_log, 'r', encoding="utf-8") as log_file:
+            with open(newest_log, 'r', encoding="utf-8", errors="replace") as log_file:
                 body += "----------\n\n.log file\n" + log_file.read()
+
+    if not body.strip():
+        body = "No log content was found. Check the script output on the host.\n"
 
     mail_exit_code, stderr_output = send_mail(subject, body, recipient, attachment_files)
     WasMailSent(logger, error_logger, mail_exit_code, stderr_output)
@@ -551,26 +561,30 @@ def main():
 
         try:
             if args.send_mail:
-                MailTo(logger, error_logger, recipient=args.send_mail, log_folder=log_folder, prefix=prefix)
+                MailTo(
+                    logger,
+                    error_logger,
+                    recipient=args.send_mail,
+                    log_folder=log_folder,
+                    prefix=prefix,
+                    subject="Syncoid cleanup FAILED - not run as root",
+                    intro=msg,
+                )
         except Exception as mail_e:
             error_logger.error(f"Additionally failed to send mail: {mail_e}")
 
         sys.exit(1)
 
-    # Read datasets from file
-    with open(args.datasets_file, "r", encoding="utf-8") as file:
-        datasets = [ln.strip() for ln in file.read().splitlines() if ln.strip()]
-
-    # Read syncoid hostnames if provided
-    syncoid_hosts = []
-    if args.syncoid_hosts_file:
-        syncoid_hosts = read_hostnames(args.syncoid_hosts_file)
-
     dry_run = args.dry_run = (args.command == 'dry-run')
-
     success = False
 
     try:
+        # Read input files inside the try block, so bad paths also trigger error mail.
+        with open(args.datasets_file, "r", encoding="utf-8") as file:
+            datasets = [ln.strip() for ln in file.read().splitlines() if ln.strip()]
+
+        syncoid_hosts = read_hostnames(args.syncoid_hosts_file)
+
         if args.command == 'dry-run':
             for dataset in datasets:
                 delete_syncoid_snapshots(logger, error_logger, dataset, syncoid_hosts, older_than, retain_count, dry_run)
@@ -599,28 +613,31 @@ def main():
         raise
 
     finally:
-        if args.send_mail and not success:
-            MailTo(
-                logger,
-                error_logger,
-                recipient=args.send_mail,
-                log_folder=log_folder,
-                prefix=prefix,
-                subject="Syncoid cleanup FAILED - logs attached",
-                intro="Cleanup failed. See attached logs.",
-            )
+        try:
+            if args.send_mail and not success:
+                MailTo(
+                    logger,
+                    error_logger,
+                    recipient=args.send_mail,
+                    log_folder=log_folder,
+                    prefix=prefix,
+                    subject="Syncoid cleanup FAILED - logs attached",
+                    intro="Cleanup failed. See attached logs.",
+                )
 
-        # Send mail on SUCCESS only if explicitly requested
-        elif args.send_mail and success and args.mail_on_success:
-            MailTo(
-                logger,
-                error_logger,
-                recipient=args.send_mail,
-                log_folder=log_folder,
-                prefix=prefix,
-                subject="Syncoid cleanup SUCCESS - logs attached",
-                intro="Cleanup completed successfully. Logs attached.",
-            )
+            # Send mail on SUCCESS only if explicitly requested
+            elif args.send_mail and success and args.mail_on_success:
+                MailTo(
+                    logger,
+                    error_logger,
+                    recipient=args.send_mail,
+                    log_folder=log_folder,
+                    prefix=prefix,
+                    subject="Syncoid cleanup SUCCESS - logs attached",
+                    intro="Cleanup completed successfully. Logs attached.",
+                )
+        except Exception as mail_e:
+            error_logger.error(f"Failed to send notification mail: {mail_e}")
 
         if success:
             delete_old_files(logger, error_logger, log_folder, prefix, older_than, retain_count, dry_run)
