@@ -31,6 +31,7 @@ This script performs **destructive operations**, including but not limited to:
 - Clean up old `.log` / `.err` files using the same retention logic
 - Generate structured logs and error reports
 - Optionally send email notifications with logs attached
+- Optionally add a custom **Title** and **Comment** at the top of notification emails
 
 ❗ **The script must be run as root.**
 
@@ -58,6 +59,8 @@ If either requirement is missing or misconfigured, **the script will fail**.
 - ✅ Log rotation / cleanup using the same retention rules
 - ✅ Separate `.log` (debug/info) and `.err` (errors) files
 - ✅ Optional email notifications (`--send-mail`) with newest logs attached
+- ✅ Optional success emails (`--mail-on-success`)
+- ✅ Optional email body title/comment (`--backup-title` / `--backup-comment`)
 - ✅ Root-only execution enforcement with safe fallback logging location
 
 ---
@@ -89,7 +92,7 @@ The dataset file must exist and contain **one ZFS dataset per line**.
 
 Example `datasets.txt`:
 
-```
+```text
 tank/data
 tank/docker
 tank/vms
@@ -107,7 +110,7 @@ This file contains hostnames that should match syncoid snapshots.
 
 Example `syncoid_hosts.txt`:
 
-```
+```text
 darkyere-VirtualBox
 backup-server
 laptop01
@@ -160,6 +163,161 @@ sudo ./SnapBeforeWatchTower.py \
 
 ---
 
+### Send email on error
+
+```bash
+sudo ./SnapBeforeWatchTower.py \
+  --command delete \
+  --datasets-file datasets.txt \
+  --syncoid-hosts-file syncoid_hosts.txt \
+  --older-than 7d \
+  --retain-count 10 \
+  --send-mail you@example.com
+```
+
+By default, `--send-mail` sends mail when the script fails.
+
+---
+
+### Send email on success and error
+
+```bash
+sudo ./SnapBeforeWatchTower.py \
+  --command delete \
+  --datasets-file datasets.txt \
+  --syncoid-hosts-file syncoid_hosts.txt \
+  --older-than 7d \
+  --retain-count 10 \
+  --send-mail you@example.com \
+  --mail-on-success
+```
+
+`--mail-on-success` makes the script send a success email when the run completes successfully.
+
+---
+
+### Send email with optional title and comment
+
+```bash
+sudo ./SnapBeforeWatchTower.py \
+  --command delete \
+  --datasets-file datasets.txt \
+  --syncoid-hosts-file syncoid_hosts.txt \
+  --older-than 7d \
+  --retain-count 10 \
+  --send-mail you@example.com \
+  --mail-on-success \
+  --backup-title "NAS weekly cleanup" \
+  --backup-comment "Prune old syncoid snapshots after backup"
+```
+
+Short options can also be used:
+
+```bash
+sudo ./SnapBeforeWatchTower.py \
+  -c delete \
+  -d datasets.txt \
+  -s syncoid_hosts.txt \
+  -o 7d \
+  -r 10 \
+  -m you@example.com \
+  -mos \
+  -bt "NAS weekly cleanup" \
+  -bc "Prune old syncoid snapshots after backup"
+```
+
+---
+
+## Email Notifications
+
+Email notification is optional and enabled with:
+
+```bash
+--send-mail you@example.com
+```
+
+or:
+
+```bash
+-m you@example.com
+```
+
+### Email subject
+
+The email subject is still controlled by the script result.
+
+Success email subject:
+
+```text
+Syncoid cleanup SUCCESS - logs attached
+```
+
+Failed email subject:
+
+```text
+Syncoid cleanup FAILED - logs attached
+```
+
+The optional backup title/comment **does not replace or change the email subject**.
+
+---
+
+### Optional backup title and comment
+
+You can add a custom title and comment to the top of the email body:
+
+```bash
+--backup-title "NAS weekly cleanup"
+--backup-comment "Prune old syncoid snapshots after backup"
+```
+
+or with short options:
+
+```bash
+-bt "NAS weekly cleanup"
+-bc "Prune old syncoid snapshots after backup"
+```
+
+These options are optional.
+
+You can use:
+
+- Neither option
+- Only `--backup-title`
+- Only `--backup-comment`
+- Both `--backup-title` and `--backup-comment`
+
+Example email body start:
+
+```text
+Title: NAS weekly cleanup
+Comment:
+Prune old syncoid snapshots after backup
+
+Cleanup completed successfully. Logs attached.
+```
+
+If neither `--backup-title` nor `--backup-comment` is used, this extra block is not added to the email body.
+
+---
+
+## Command Line Options
+
+| Option | Short | Required | Description |
+|---|---:|---:|---|
+| `--command` | `-c` | ✅ | `delete` or `dry-run` |
+| `--datasets-file` | `-d` | ✅ | File containing ZFS datasets, one per line |
+| `--syncoid-hosts-file` | `-s` | ✅ | File containing syncoid hostnames, one per line |
+| `--older-than` | `-o` | ❌ | Delete snapshots/logs older than `Nd`, `Nw`, or `Nm` |
+| `--retain-count` | `-r` | ❌ | Always keep newest `N` snapshots/log groups |
+| `--log-prefix` | `-l` | ❌ | Custom prefix for log filenames |
+| `--send-mail` | `-m` | ❌ | Send email notification to an address |
+| `--mail-on-success` | `-mos` | ❌ | Also send mail when the run succeeds |
+| `--backup-title` | `-bt` | ❌ | Optional title written at the top of notification emails |
+| `--backup-comment` | `-bc` | ❌ | Optional comment written at the top of notification emails |
+
+---
+
 ## Retention Logic (Important)
 
 Retention is applied **per hostname**, inside **each dataset**.
@@ -183,7 +341,7 @@ Retention is applied **per hostname**, inside **each dataset**.
 
 Log files are created as:
 
-```
+```text
 <prefix>-Date-YYYY-MM-DD_HH_MM_SS.log
 <prefix>-Date-YYYY-MM-DD_HH_MM_SS.err
 ```
