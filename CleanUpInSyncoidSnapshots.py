@@ -228,6 +228,30 @@ def WasMailSent(logger, error_logger, MailExitCode, popenstderr):
         error_logger.error('----------')
 
 
+def build_backup_mail_header(backup_title: str = "", backup_comment: str = "") -> str:
+    """
+    Build the optional text block that is written at the very top of notification emails.
+
+    The email subject still stays as SUCCESS/FAILED. These values are only written
+    into the body of the mail.
+    """
+    backup_title = (backup_title or "").strip()
+    backup_comment = (backup_comment or "").strip()
+
+    if not backup_title and not backup_comment:
+        return ""
+
+    lines = [
+        f"Title: {backup_title}",
+        "Comment:",
+    ]
+
+    if backup_comment:
+        lines.append(backup_comment)
+
+    return "\n".join(lines).rstrip() + "\n\n"
+
+
 def MailTo(
     logger,
     error_logger,
@@ -236,13 +260,15 @@ def MailTo(
     prefix: str,
     subject: str = "Syncoid cleanup report - logs attached",
     intro: str = "",
+    backup_title: str = "",
+    backup_comment: str = "",
 ):
     log_blank_line(logger)
     logger.info("Preparing email report...")
 
     newest_log, newest_err = get_newest_files(log_folder, prefix)
     attachment_files = []
-    body = ""
+    body = build_backup_mail_header(backup_title, backup_comment)
 
     if intro:
         body += intro.strip() + "\n\n"
@@ -535,12 +561,28 @@ def main():
         action="store_true",
         help="Also send email when the run completes successfully (default: mail on error only)",
     )
+
+    parser.add_argument(
+        "-bt",
+        "--backup-title",
+        default="",
+        help="Optional backup title written at the top of notification emails",
+    )
+
+    parser.add_argument(
+        "-bc",
+        "--backup-comment",
+        default="",
+        help="Optional backup comment written at the top of notification emails",
+    )
     
     args = parser.parse_args()
 
     prefix = args.log_prefix
     retain_count = max(int(args.retain_count or 0), 0)
     older_than = args.older_than  # Optional[datetime.timedelta]
+    backup_title = args.backup_title
+    backup_comment = args.backup_comment
 
     log_date = datetime.datetime.now().strftime('%Y-%m-%d_%H_%M_%S')
 
@@ -569,6 +611,8 @@ def main():
                     prefix=prefix,
                     subject="Syncoid cleanup FAILED - not run as root",
                     intro=msg,
+                    backup_title=backup_title,
+                    backup_comment=backup_comment,
                 )
         except Exception as mail_e:
             error_logger.error(f"Additionally failed to send mail: {mail_e}")
@@ -623,6 +667,8 @@ def main():
                     prefix=prefix,
                     subject="Syncoid cleanup FAILED - logs attached",
                     intro="Cleanup failed. See attached logs.",
+                    backup_title=backup_title,
+                    backup_comment=backup_comment,
                 )
 
             # Send mail on SUCCESS only if explicitly requested
@@ -635,6 +681,8 @@ def main():
                     prefix=prefix,
                     subject="Syncoid cleanup SUCCESS - logs attached",
                     intro="Cleanup completed successfully. Logs attached.",
+                    backup_title=backup_title,
+                    backup_comment=backup_comment,
                 )
         except Exception as mail_e:
             error_logger.error(f"Failed to send notification mail: {mail_e}")
