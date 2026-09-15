@@ -9,6 +9,21 @@ import glob
 import sys
 from typing import List, Tuple, Optional
 import tempfile
+from mqtt_notifications import load_mqtt_config, build_mqtt_report, notify_mqtt
+
+
+__version__ = "0.0.2"
+
+
+class ReportWarningHandler(logging.Handler):
+    """Remember logged errors even if retention later removes their log file."""
+
+    def __init__(self, state):
+        super().__init__(logging.ERROR)
+        self.state = state
+
+    def emit(self, record):
+        self.state["warning"] = True
 
 
 def setup_logger(log_folder: str, log_date: str, prefix: str) -> Tuple[logging.Logger, logging.Logger, str]:
@@ -515,10 +530,6 @@ def delete_old_files(
                 except Exception as e:
                     error_logger.error(f"Failed to delete file: {filename}. Error: {e}")
 
-def script_base_name() -> str:
-    base = os.path.splitext(os.path.basename(__file__))[0]
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", base)
-
 def main():
     # Get scripts name
     default_script_name = script_base_name()
@@ -527,10 +538,13 @@ def main():
     parser = argparse.ArgumentParser(
         description="Delete syncoid snapshots for ZFS datasets (delete-only)."
     )
+    parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
+    parser.add_argument('--mqtt-config', metavar='FILE',
+                        help='Optional JSON MQTT settings file for final success/failure reports')
 
     # Required arguments
     parser.add_argument('-c', '--command', choices=['delete', 'dry-run'], required=True, 
-                        help='Command: delete')
+                        help='Command: delete snapshots or preview with dry-run')
     
     parser.add_argument('-d', '--datasets-file', required=True, 
                         help='Path to the file containing the dataset names')
@@ -578,6 +592,46 @@ def main():
     
     args = parser.parse_args()
 
+    mqtt_config = None
+    if args.mqtt_config:
+        try:
+            mqtt_config = load_mqtt_config(args.mqtt_config)
+        except (OSError, ValueError) as exc:
+            # Avoid echoing config contents, which can contain broker credentials.
+            parser.error(f"Cannot load MQTT config ({type(exc).__name__}); check the JSON settings and certificate paths")
+
+    state = {}
+    exit_code = 0
+    failure = None
+    try:
+        run_cleanup(args, state)
+    except SystemExit as exc:
+        exit_code = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+        failure = state.get("error") or (str(exc) if exit_code else None)
+        raise
+    except KeyboardInterrupt:
+        exit_code = 130
+        failure = "Cleanup interrupted by user"
+        raise
+    except Exception as exc:
+        exit_code = 1
+        failure = exc
+        raise
+    finally:
+        # Report only after existing mail and log cleanup have finished.
+        if mqtt_config is not None:
+            report = build_mqtt_report(args, __version__, exit_code, failure, state.get("warning", False))
+            notify_mqtt(mqtt_config, report, state.get("error_logger"))
+        warning_handler = state.get("warning_handler")
+        if warning_handler:
+            state["error_logger"].removeHandler(warning_handler)
+            warning_handler.close()
+
+
+def run_cleanup(args, state):
+    """Run the original cleanup lifecycle; expose final diagnostics for MQTT."""
+    default_script_name = script_base_name()
+
     prefix = args.log_prefix
     retain_count = max(int(args.retain_count or 0), 0)
     older_than = args.older_than  # Optional[datetime.timedelta]
@@ -593,12 +647,18 @@ def main():
     log_folder = pick_log_folder(preferred_log_folder, tmp_name=default_script_name)
 
     logger, error_logger, err_filepath = setup_logger(log_folder, log_date, prefix)
+    state.update(error_logger=error_logger, err_filepath=err_filepath)
+    if args.mqtt_config:
+        warning_handler = ReportWarningHandler(state)
+        error_logger.addHandler(warning_handler)
+        state["warning_handler"] = warning_handler
 
     if os.geteuid() != 0:
         msg = (
             "This script must be run as root (sudo). "
-            f"Logs were written to: {log_folder} (fallback, because not root)."
+            f"Logs were written to: {log_folder}."
         )
+        state["error"] = msg
         error_logger.error(msg)
 
         try:

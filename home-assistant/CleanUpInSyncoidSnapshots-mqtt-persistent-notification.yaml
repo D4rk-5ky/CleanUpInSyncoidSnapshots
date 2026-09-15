@@ -1,0 +1,158 @@
+blueprint:
+  name: CleanUpInSyncoidSnapshots - MQTT persistent notification
+  description: >-
+    Listen for the final JSON report published by CleanUpInSyncoidSnapshots and
+    show a Home Assistant persistent notification. The report is classified as
+    success, success with warning, or failure. This blueprint only receives
+    status reports; it does not start cleanup or publish MQTT commands.
+  domain: automation
+  input:
+    mqtt_topic:
+      name: MQTT status topic
+      description: >-
+        Must exactly match the topic configured in mqtt-config.json on the
+        CleanUpInSyncoidSnapshots host.
+      default: homeassistant/CleanUpInSyncoidSnapshots/Zotac-RI531/status
+      selector:
+        text:
+    notify_success:
+      name: Notify on success
+      description: Create a persistent notification for clean successful runs.
+      default: true
+      selector:
+        boolean:
+    notify_warning:
+      name: Notify on success with warnings
+      description: >-
+        Create a persistent notification when status is success but warning is true.
+      default: true
+      selector:
+        boolean:
+    notify_failure:
+      name: Notify on failure
+      description: Create a persistent notification for failed runs.
+      default: true
+      selector:
+        boolean:
+    notify_dry_run:
+      name: Notify on dry-run reports
+      description: >-
+        Allow notifications for dry-run reports. The cleanup application must
+        separately have publish_dry_run enabled before such reports are sent.
+      default: true
+      selector:
+        boolean:
+    replace_previous:
+      name: Replace previous notification
+      description: >-
+        When enabled, reuse the notification ID below so only the newest report
+        from this blueprint automation remains in Home Assistant.
+      default: true
+      selector:
+        boolean:
+    notification_id:
+      name: Notification ID
+      description: >-
+        Used only when replacing the previous notification. Give each host/job a
+        different ID when you create multiple automations from this blueprint.
+      default: cleanup_syncoid_snapshots_status
+      selector:
+        text:
+
+triggers:
+  - trigger: mqtt
+    topic: !input mqtt_topic
+
+conditions:
+  - condition: template
+    value_template: >-
+      {{ trigger.payload_json is defined
+         and trigger.payload_json is mapping
+         and trigger.payload_json.get('name') == 'CleanUpInSyncoidSnapshots'
+         and trigger.payload_json.get('status') in ['success', 'failure'] }}
+
+actions:
+  - variables:
+      cfg_notify_success: !input notify_success
+      cfg_notify_warning: !input notify_warning
+      cfg_notify_failure: !input notify_failure
+      cfg_notify_dry_run: !input notify_dry_run
+      cfg_replace_previous: !input replace_previous
+      cfg_notification_id: !input notification_id
+      report_status: "{{ trigger.payload_json.get('status', 'unknown') }}"
+      report_warning: "{{ trigger.payload_json.get('warning', false) == true }}"
+      report_dry_run: "{{ trigger.payload_json.get('dry_run', false) == true }}"
+      notification_title: >-
+        {% if trigger.payload_json.get('status') == 'failure' %}
+          ❌ {{ trigger.payload_json.get('title') or trigger.payload_json.get('job') or 'CleanUpInSyncoidSnapshots' }} - FAILED
+        {% elif trigger.payload_json.get('warning', false) == true %}
+          ⚠️ {{ trigger.payload_json.get('title') or trigger.payload_json.get('job') or 'CleanUpInSyncoidSnapshots' }} - completed with warnings
+        {% elif trigger.payload_json.get('dry_run', false) == true %}
+          🧪 {{ trigger.payload_json.get('title') or trigger.payload_json.get('job') or 'CleanUpInSyncoidSnapshots' }} - dry-run completed
+        {% else %}
+          ✅ {{ trigger.payload_json.get('title') or trigger.payload_json.get('job') or 'CleanUpInSyncoidSnapshots' }} - successful
+        {% endif %}
+      notification_message: >-
+        **Status:** {{ trigger.payload_json.get('status', 'unknown') | upper }}
+
+        **Warning:** {{ 'Yes' if trigger.payload_json.get('warning', false) == true else 'No' }}
+
+        **Command:** {{ trigger.payload_json.get('command', 'unknown') }}
+
+        **Dry-run:** {{ 'Yes' if trigger.payload_json.get('dry_run', false) == true else 'No' }}
+
+        **Exit code:** {{ trigger.payload_json.get('exit_code', 'unknown') }}
+
+        **Job:** {{ trigger.payload_json.get('job', '') or 'not supplied' }}
+
+        **Version:** {{ trigger.payload_json.get('version', '') or 'unknown' }}
+
+        **Report time (UTC):** {{ trigger.payload_json.get('timestamp', '') or 'unknown' }}
+        {% if trigger.payload_json.get('comment', '') %}
+
+        **Comment:** {{ trigger.payload_json.get('comment') }}
+        {% endif %}
+        {% if trigger.payload_json.get('error', '') %}
+
+        **Error:** {{ trigger.payload_json.get('error') }}
+        {% endif %}
+        {% if trigger.payload_json.get('stderr', '') %}
+
+        **Command output:**
+        ```text
+        {{ trigger.payload_json.get('stderr') }}
+        ```
+        {% endif %}
+        {% if trigger.payload_json.get('warning', false) == true
+              and not trigger.payload_json.get('error', '')
+              and not trigger.payload_json.get('stderr', '') %}
+
+        The run completed, but the application logged one or more nonfatal errors.
+        Check the cleanup logs for details.
+        {% endif %}
+
+  - condition: template
+    value_template: >-
+      {{ (not report_dry_run or cfg_notify_dry_run)
+         and ((report_status == 'failure' and cfg_notify_failure)
+              or (report_status == 'success' and report_warning and cfg_notify_warning)
+              or (report_status == 'success' and not report_warning and cfg_notify_success)) }}
+
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ cfg_replace_previous }}"
+        sequence:
+          - action: persistent_notification.create
+            data:
+              title: "{{ notification_title | trim }}"
+              message: "{{ notification_message }}"
+              notification_id: "{{ cfg_notification_id }}"
+    default:
+      - action: persistent_notification.create
+        data:
+          title: "{{ notification_title | trim }}"
+          message: "{{ notification_message }}"
+
+mode: queued
+max: 10

@@ -1,0 +1,15 @@
+{
+  "host": "mqtt.example.lan",
+  "port": 1883,
+  "topic": "homeassistant/CleanUpInSyncoidSnapshots/Zotac-RI531/status",
+  "username": null,
+  "password": null,
+  "client_id": "",
+  "qos": 1,
+  "timeout": 15,
+  "tls": false,
+  "ca_certs": null,
+  "certfile": null,
+  "keyfile": null,
+  "publish_dry_run": false
+}

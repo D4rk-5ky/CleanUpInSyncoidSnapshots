@@ -1,0 +1,2 @@
+# Optional: required only to deliver MQTT reports.
+paho-mqtt>=2.1,<3
