@@ -20,56 +20,199 @@ from unittest.mock import Mock, patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import CleanUpInSyncoidSnapshots as app
+import config_loader as config
 import mqtt_notifications as mqtt
 
 
 def arguments(**overrides):
-    """Supply representative parsed CLI values for report tests."""
-    values = dict(backup_title="NAS cleanup", backup_comment="After replication",
-                  log_prefix="cleanup", command="delete")
+    """Supply representative runtime values for MQTT report tests."""
+    values = dict(
+        backup_title="NAS cleanup",
+        backup_comment="After replication",
+        log_prefix="cleanup",
+        command="delete",
+    )
     return argparse.Namespace(**dict(values, **overrides))
 
 
-class ConfigTests(unittest.TestCase):
-    def load(self, **overrides):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "mqtt.json"
-            path.write_text(json.dumps(dict(host="localhost", topic="cleanup/status", **overrides)))
-            return mqtt.load_mqtt_config(path)
+def write_config(directory: Path, *, command="delete", mqtt_enabled=False,
+                 mail_enabled=False, mail_on_success=False, extra="") -> Path:
+    """Create a complete harmless TOML config plus referenced input files for lifecycle tests."""
+    datasets = directory / "datasets.txt"
+    hosts = directory / "hosts.txt"
+    datasets.write_text("tank/data\n", encoding="utf-8")
+    hosts.write_text("host\n", encoding="utf-8")
+    path = directory / "config.toml"
+    text = f'''[cleanup]
+command = "{command}"
+datasets_file = "datasets.txt"
+syncoid_hosts_file = "hosts.txt"
+older_than = ""
+retain_count = 1
 
-    def test_example_covers_every_option(self):
-        config = mqtt.load_mqtt_config(ROOT / "mqtt-config-example.json")
-        self.assertEqual(set(config), set(mqtt.DEFAULTS) | {"host", "topic"})
+[logging]
+prefix = "cleanup"
+
+[report]
+title = "NAS cleanup"
+comment = "After replication"
+
+[mail]
+enabled = {str(mail_enabled).lower()}
+recipient = "nobody@example.invalid"
+on_success = {str(mail_on_success).lower()}
+
+[mqtt]
+enabled = {str(mqtt_enabled).lower()}
+host = "localhost"
+port = 1883
+topic = "test/cleanup/status"
+username = ""
+password = ""
+client_id = ""
+qos = 1
+timeout = 15
+tls = false
+ca_certs = ""
+certfile = ""
+keyfile = ""
+publish_dry_run = false
+{extra}
+'''
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+class TomlConfigTests(unittest.TestCase):
+    def test_example_contains_every_supported_setting(self):
+        with (ROOT / "config-example.toml").open("rb") as stream:
+            document = config.tomllib.load(stream)
+        self.assertEqual(set(document), config.TOP_LEVEL_SECTIONS)
+        for section, keys in config.SECTION_KEYS.items():
+            self.assertEqual(set(document[section]), keys)
+
+    def test_example_loads_and_is_safe_by_default(self):
+        loaded = config.load_config(ROOT / "config-example.toml", "fallback")
+        self.assertEqual(loaded.command, "dry-run")
+        self.assertFalse(loaded.send_mail)
+        self.assertIsNone(loaded.mqtt_config)
+        self.assertTrue(Path(loaded.datasets_file).is_absolute())
+        self.assertEqual(Path(loaded.datasets_file), ROOT / "datasets-example")
+
+    def test_defaults_and_negative_retain_compatibility(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            (folder / "datasets").write_text("tank/data\n", encoding="utf-8")
+            (folder / "hosts").write_text("host\n", encoding="utf-8")
+            path = folder / "minimal.toml"
+            path.write_text('''[cleanup]
+command = "dry-run"
+datasets_file = "datasets"
+syncoid_hosts_file = "hosts"
+retain_count = -5
+''', encoding="utf-8")
+            loaded = config.load_config(path, "fallback")
+        self.assertIsNone(loaded.older_than)
+        self.assertEqual(loaded.retain_count, 0)
+        self.assertEqual(loaded.log_prefix, "fallback")
+        self.assertIsNone(loaded.send_mail)
+        self.assertIsNone(loaded.mqtt_config)
+
+    def test_invalid_cleanup_and_unknown_keys_are_rejected(self):
+        bad_documents = (
+            '''[cleanup]\ncommand="erase"\ndatasets_file="d"\nsyncoid_hosts_file="h"\n''',
+            '''[cleanup]\ncommand="delete"\ndatasets_file="d"\nsyncoid_hosts_file="h"\nretain_count="1"\n''',
+            '''[cleanup]\ncommand="delete"\ndatasets_file="d"\nsyncoid_hosts_file="h"\nunknown=true\n''',
+            '''[cleanup]\ncommand="delete"\ndatasets_file="d"\nsyncoid_hosts_file="h"\n[extra]\nvalue=1\n''',
+        )
+        for text in bad_documents:
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "bad.toml"
+                path.write_text(text, encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    config.load_config(path, "fallback")
+
+    def test_mail_requires_recipient_only_when_enabled(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            path = folder / "bad.toml"
+            path.write_text('''[cleanup]
+command="delete"
+datasets_file="d"
+syncoid_hosts_file="h"
+[mail]
+enabled=true
+recipient=""
+''', encoding="utf-8")
+            with self.assertRaises(ValueError):
+                config.load_config(path, "fallback")
+
+    def test_relative_paths_are_config_relative(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            path = write_config(folder)
+            loaded = config.load_config(path, "fallback")
+            self.assertEqual(Path(loaded.datasets_file), folder / "datasets.txt")
+            self.assertEqual(Path(loaded.syncoid_hosts_file), folder / "hosts.txt")
+
+    def test_cli_accepts_only_config_option(self):
+        stderr = io.StringIO()
+        with patch.object(sys, "argv", ["cleanup", "--command", "dry-run"]), \
+                patch.object(sys, "stderr", stderr), \
+                patch.object(app, "run_cleanup") as cleanup, self.assertRaises(SystemExit) as caught:
+            app.main()
+        self.assertEqual(caught.exception.code, 2)
+        self.assertIn("usage: cleanup -c CONFIG", stderr.getvalue())
+        self.assertIn("unrecognized arguments: --command dry-run", stderr.getvalue())
+        cleanup.assert_not_called()
+
+
+class MqttConfigTests(unittest.TestCase):
+    def validate(self, **overrides):
+        supplied = dict(host="localhost", topic="cleanup/status", **overrides)
+        return mqtt.validate_mqtt_config(supplied, Path.cwd())
 
     def test_defaults(self):
-        config = self.load()
-        self.assertEqual(config["qos"], 1)
-        self.assertFalse(config["publish_dry_run"])
+        loaded = self.validate()
+        self.assertEqual(loaded["qos"], 1)
+        self.assertFalse(loaded["publish_dry_run"])
+        self.assertIsNone(loaded["username"])
+        self.assertIsNone(loaded["password"])
+
+    def test_plain_string_password_is_supported(self):
+        loaded = self.validate(username="user", password="<String>")
+        self.assertEqual(loaded["password"], "<String>")
 
     def test_invalid_options(self):
-        for overrides in ({"port": 0}, {"qos": True}, {"timeout": 0},
-                          {"timeout": float("nan")}, {"tls": "false"},
-                          {"password": "secret"}, {"retain": True},
-                          {"certfile": "missing"}, {"client_id": None}):
+        for overrides in (
+            {"port": 0},
+            {"qos": True},
+            {"timeout": 0},
+            {"timeout": float("nan")},
+            {"tls": "false"},
+            {"password": "secret"},
+            {"retain": True},
+            {"certfile": "missing"},
+            {"client_id": None},
+        ):
             with self.subTest(overrides=overrides), self.assertRaises(ValueError):
-                self.load(**overrides)
+                self.validate(**overrides)
 
     def test_invalid_topic_and_shape(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "mqtt.json"
-            for value in ([], {"host": "localhost", "topic": "cleanup/#"},
-                          {"host": "localhost", "topic": ""}):
-                path.write_text(json.dumps(value))
-                with self.assertRaises(ValueError):
-                    mqtt.load_mqtt_config(path)
+        for value in ([], {"host": "localhost", "topic": "cleanup/#"}, {"host": "localhost", "topic": ""}):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                mqtt.validate_mqtt_config(value, Path.cwd())
 
     def test_relative_certificate_paths(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "mqtt.json"
-            certificate = Path(directory) / "ca.pem"
-            certificate.write_text("placeholder; parsing happens in TLS library")
-            path.write_text(json.dumps(dict(host="localhost", topic="status", tls=True, ca_certs="ca.pem")))
-            self.assertEqual(mqtt.load_mqtt_config(path)["ca_certs"], str(certificate))
+            folder = Path(directory)
+            certificate = folder / "ca.pem"
+            certificate.write_text("placeholder; parsing happens in TLS library", encoding="utf-8")
+            loaded = mqtt.validate_mqtt_config(
+                dict(host="localhost", topic="status", tls=True, ca_certs="ca.pem"),
+                folder,
+            )
+            self.assertEqual(loaded["ca_certs"], str(certificate))
 
 
 class ReportTests(unittest.TestCase):
@@ -103,20 +246,20 @@ class ReportTests(unittest.TestCase):
         launch.assert_not_called()
 
     def test_worker_input_and_timeout(self):
-        config = dict(mqtt.DEFAULTS, host="localhost", topic="status", username="u", password="secret")
+        mqtt_config = dict(mqtt.DEFAULTS, host="localhost", topic="status", username="u", password="secret")
         report = mqtt.build_mqtt_report(arguments(), "0.0.1", 0)
         with patch.object(mqtt.subprocess, "run", return_value=Mock(returncode=0)) as launch:
-            mqtt.notify_mqtt(config, report)
+            mqtt.notify_mqtt(mqtt_config, report)
         call = launch.call_args
         self.assertNotIn("secret", " ".join(call.args[0]))
         self.assertEqual(json.loads(call.kwargs["input"])["report"], report)
         self.assertEqual(call.kwargs["timeout"], 15)
 
     def test_dry_run_requires_explicit_publish_opt_in(self):
-        config = dict(mqtt.DEFAULTS, publish_dry_run=True)
+        mqtt_config = dict(mqtt.DEFAULTS, publish_dry_run=True)
         report = mqtt.build_mqtt_report(arguments(command="dry-run"), "0.0.1", 0)
         with patch.object(mqtt.subprocess, "run", return_value=Mock(returncode=0)) as launch:
-            mqtt.notify_mqtt(config, report)
+            mqtt.notify_mqtt(mqtt_config, report)
         self.assertTrue(json.loads(launch.call_args.kwargs["input"])["report"]["dry_run"])
 
     def test_delivery_failure_is_logged_and_secret_not_echoed(self):
@@ -136,11 +279,19 @@ class ReportTests(unittest.TestCase):
         single = Mock()
         publish = types.ModuleType("paho.mqtt.publish")
         publish.single = single
-        config = dict(mqtt.DEFAULTS, host="localhost", topic="status", tls=True,
-                      username="test", password="secret", ca_certs="ca.pem",
-                      certfile="client.pem", keyfile="client.key")
+        mqtt_config = dict(
+            mqtt.DEFAULTS,
+            host="localhost",
+            topic="status",
+            tls=True,
+            username="test",
+            password="secret",
+            ca_certs="ca.pem",
+            certfile="client.pem",
+            keyfile="client.key",
+        )
         with patch.dict(sys.modules, {"paho.mqtt.publish": publish}), \
-                patch.object(sys, "stdin", io.StringIO(json.dumps({"config": config, "report": {"status": "success"}}))), \
+                patch.object(sys, "stdin", io.StringIO(json.dumps({"config": mqtt_config, "report": {"status": "success"}}))), \
                 patch.object(mqtt.ssl, "create_default_context") as context:
             mqtt.publish_worker()
         context.assert_called_once_with(cafile="ca.pem")
@@ -189,29 +340,29 @@ class BlueprintTests(unittest.TestCase):
 
 
 class LifecycleTests(unittest.TestCase):
-    def invoke(self, command="delete", root=True, zfs_error=None, cleanup_error=None, mail_error=None, mqtt_enabled=True, missing_input=False):
-        """Exercise actual CLI/lifecycle with harmless command and logger substitutes."""
+    def invoke(self, command="delete", root=True, zfs_error=None, cleanup_error=None,
+               mail_error=None, mqtt_enabled=True, missing_input=False):
+        """Exercise actual config/CLI/lifecycle with harmless command and logger substitutes."""
         with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
             folder = Path(directory)
-            datasets = folder / "datasets"
-            hosts = folder / "hosts"
-            datasets.write_text("tank/data\n")
-            hosts.write_text("host\n")
+            config_path = write_config(
+                folder,
+                command=command,
+                mqtt_enabled=mqtt_enabled,
+                mail_enabled=bool(mail_error),
+                mail_on_success=bool(mail_error),
+            )
             if missing_input:
-                datasets.unlink()
-            argv = ["cleanup", "-c", command, "-d", str(datasets), "-s", str(hosts), "-r", "1"]
-            if mqtt_enabled:
-                argv += ["--mqtt-config", str(ROOT / "mqtt-config-example.json")]
-            if mail_error:
-                argv += ["--send-mail", "nobody@example.invalid", "--mail-on-success"]
-            stack.enter_context(patch.object(sys, "argv", argv))
+                (folder / "datasets.txt").unlink()
+            stack.enter_context(patch.object(sys, "argv", ["cleanup", "-c", str(config_path)]))
             stack.enter_context(patch.object(app.os, "geteuid", return_value=0 if root else 1000, create=True))
             stack.enter_context(patch.object(app, "pick_log_folder", return_value=directory))
             error_logger = logging.Logger("test-errors")
             error_logger.addHandler(logging.NullHandler())
             stack.enter_context(patch.object(app, "setup_logger", return_value=(Mock(), error_logger, str(folder / "absent.err"))))
-            command_mock = stack.enter_context(patch.object(app, "run_cmd", side_effect=zfs_error,
-                                                           return_value=Mock(stdout="")))
+            command_mock = stack.enter_context(
+                patch.object(app, "run_cmd", side_effect=zfs_error, return_value=Mock(stdout=""))
+            )
             stack.enter_context(patch.object(app, "delete_old_files", side_effect=cleanup_error))
             stack.enter_context(patch.object(app, "MailTo", side_effect=mail_error))
             notify = stack.enter_context(patch.object(app, "notify_mqtt"))
@@ -274,12 +425,15 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(notify.call_args.args[1]["status"], "failure")
 
     def test_invalid_config_stops_before_cleanup(self):
-        argv = ["cleanup", "-c", "delete", "-d", "datasets", "-s", "hosts", "--mqtt-config", "missing.json"]
-        with patch.object(sys, "argv", argv), patch.object(sys, "stderr", io.StringIO()), \
-                patch.object(app, "run_cleanup") as cleanup, self.assertRaises(SystemExit) as caught:
-            app.main()
-        self.assertEqual(caught.exception.code, 2)
-        cleanup.assert_not_called()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "bad.toml"
+            path.write_text('''[cleanup]\ncommand="delete"\ndatasets_file="d"\nsyncoid_hosts_file="h"\n[mqtt]\nenabled=true\n''', encoding="utf-8")
+            with patch.object(sys, "argv", ["cleanup", "-c", str(path)]), \
+                    patch.object(sys, "stderr", io.StringIO()), \
+                    patch.object(app, "run_cleanup") as cleanup, self.assertRaises(SystemExit) as caught:
+                app.main()
+            self.assertEqual(caught.exception.code, 2)
+            cleanup.assert_not_called()
 
 
 class RetentionTests(unittest.TestCase):
@@ -310,7 +464,7 @@ class RetentionTests(unittest.TestCase):
             newest = folder / "cleanup-Date-2021-01-01_00_00_00.log"
             unrelated = folder / "other.log"
             for file in old + [newest, unrelated]:
-                file.write_text("test")
+                file.write_text("test", encoding="utf-8")
             app.delete_old_files(Mock(), Mock(), directory, "cleanup", None, 1, True)
             self.assertTrue(all(file.exists() for file in old))
             app.delete_old_files(Mock(), Mock(), directory, "cleanup", None, 1, False)
@@ -389,13 +543,20 @@ class BrokerIntegrationTests(unittest.TestCase):
 
         worker = threading.Thread(target=serve, daemon=True)
         worker.start()
-        config = dict(mqtt.DEFAULTS, host="127.0.0.1", topic="test/cleanup/status",
-                      port=listener.getsockname()[1], qos=qos, timeout=1 if mode == "stall" else 5,
-                      username="test-user", password="test-password")
+        mqtt_config = dict(
+            mqtt.DEFAULTS,
+            host="127.0.0.1",
+            topic="test/cleanup/status",
+            port=listener.getsockname()[1],
+            qos=qos,
+            timeout=1 if mode == "stall" else 5,
+            username="test-user",
+            password="test-password",
+        )
         logger = Mock()
         report = mqtt.build_mqtt_report(arguments(), "0.0.1", 0)
         start = time.monotonic()
-        mqtt.notify_mqtt(config, report, logger)
+        mqtt.notify_mqtt(mqtt_config, report, logger)
         elapsed = time.monotonic() - start
         worker.join(6)
         self.assertFalse(worker.is_alive())

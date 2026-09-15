@@ -1,2 +1,5 @@
-# Optional: required only to deliver MQTT reports.
+# Base configuration dependency for Python 3.10.
+-r requirements.txt
+
+# Optional: required only when [mqtt].enabled=true.
 paho-mqtt>=2.1,<3
