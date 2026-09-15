@@ -9,10 +9,11 @@ import glob
 import sys
 from typing import List, Tuple, Optional
 import tempfile
-from mqtt_notifications import load_mqtt_config, build_mqtt_report, notify_mqtt
+from config_loader import load_config, parse_older_than
+from mqtt_notifications import build_mqtt_report, notify_mqtt
 
 
-__version__ = "0.0.2"
+__version__ = "0.0.3"
 
 
 class ReportWarningHandler(logging.Handler):
@@ -446,24 +447,6 @@ def delete_syncoid_snapshots(
         log_blank_line(logger)
         logger.info(f"[{dataset}] Syncoid pruning done. Deleted total: {total_delete}")
 
-def parse_older_than(value: str) -> datetime.timedelta:
-    pattern = r'^(\d+)([dwm])$'
-    match = re.match(pattern, value)
-    if not match:
-        raise argparse.ArgumentTypeError("Invalid value for --older-than. Use format 'Nd', 'Nw', or 'Nm' (N=integer).")
-
-    num = int(match.group(1))
-    unit = match.group(2)
-
-    if unit == 'd':
-        return datetime.timedelta(days=num)
-    if unit == 'w':
-        return datetime.timedelta(weeks=num)
-    if unit == 'm':
-        return datetime.timedelta(days=num * 30)
-    raise argparse.ArgumentTypeError("Invalid value for --older-than. Use format 'Nd', 'Nw', or 'Nm' (N=integer).")
-
-
 def delete_old_files(
     logger: logging.Logger,
     error_logger: logging.Logger,
@@ -531,75 +514,38 @@ def delete_old_files(
                     error_logger.error(f"Failed to delete file: {filename}. Error: {e}")
 
 def main():
-    # Get scripts name
     default_script_name = script_base_name()
-    
-    # Argument parsing
+
+    # The application intentionally exposes only one runtime option: -c CONFIG.
+    # All cleanup, retention, mail, report, logging, and MQTT behavior lives in TOML.
     parser = argparse.ArgumentParser(
-        description="Delete syncoid snapshots for ZFS datasets (delete-only)."
+        description="Delete matching syncoid ZFS snapshots using one TOML configuration file.",
+        usage="%(prog)s -c CONFIG",
+        add_help=False,
     )
-    parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
-    parser.add_argument('--mqtt-config', metavar='FILE',
-                        help='Optional JSON MQTT settings file for final success/failure reports')
-
-    # Required arguments
-    parser.add_argument('-c', '--command', choices=['delete', 'dry-run'], required=True, 
-                        help='Command: delete snapshots or preview with dry-run')
-    
-    parser.add_argument('-d', '--datasets-file', required=True, 
-                        help='Path to the file containing the dataset names')
-    
-    # NEW: syncoid hosts file
-    parser.add_argument('-s', "--syncoid-hosts-file", required=True, 
-                        help="File containing hostnames (one per line) to match syncoid_<hostname>_* snapshots")
-    
-    # NEW: optional older-than
-    parser.add_argument('-o', '--older-than', type=parse_older_than, required=False,
-                        help="Delete snapshots/logs older than 'Nd', 'Nw', or 'Nm' (N=integer)")
-
-    # NEW: optional retain-count (default 0)
-    parser.add_argument('-r', '--retain-count', type=int, default=0,
-                        help='Number of newest snapshots/log groups to retain (default: 0)')
-
-    # NEW: custom snapshot/log prefix
-    parser.add_argument('-l', "--log-prefix", default=default_script_name, 
-                        help="Prefix used for log file names (default: script filename)")
-
-    # NEW: send email notification
-    parser.add_argument('-m', '--send-mail', metavar='EMAIL', 
-                        help='Send an email notification to the specified email address')
-
     parser.add_argument(
-        "-mos",
-        "--mail-on-success",
-        action="store_true",
-        help="Also send email when the run completes successfully (default: mail on error only)",
+        "-c",
+        metavar="CONFIG",
+        required=False,
+        help=(
+            "Path to the TOML configuration file. All cleanup, retention, logging, "
+            "mail, report, and MQTT settings are read from this file."
+        ),
     )
+    cli_args, unknown_args = parser.parse_known_args()
+    if unknown_args:
+        parser.error(f"unrecognized arguments: {' '.join(unknown_args)}")
+    if not cli_args.c:
+        parser.error("the following arguments are required: -c")
 
-    parser.add_argument(
-        "-bt",
-        "--backup-title",
-        default="",
-        help="Optional backup title written at the top of notification emails",
-    )
+    try:
+        args = load_config(cli_args.c, default_script_name)
+    except (OSError, ValueError, RuntimeError) as exc:
+        # Configuration can contain credentials, so report only the error message and
+        # never dump the parsed document or raw TOML contents.
+        parser.error(f"Cannot load configuration: {exc}")
 
-    parser.add_argument(
-        "-bc",
-        "--backup-comment",
-        default="",
-        help="Optional backup comment written at the top of notification emails",
-    )
-    
-    args = parser.parse_args()
-
-    mqtt_config = None
-    if args.mqtt_config:
-        try:
-            mqtt_config = load_mqtt_config(args.mqtt_config)
-        except (OSError, ValueError) as exc:
-            # Avoid echoing config contents, which can contain broker credentials.
-            parser.error(f"Cannot load MQTT config ({type(exc).__name__}); check the JSON settings and certificate paths")
-
+    mqtt_config = args.mqtt_config
     state = {}
     exit_code = 0
     failure = None

@@ -1,0 +1,94 @@
+# CleanUpInSyncoidSnapshots configuration example.
+# Copy this file to e.g. config.toml, edit it, and run:
+#   sudo python3 CleanUpInSyncoidSnapshots.py -c config.toml
+#
+# Relative filesystem paths in this file are resolved relative to this TOML file.
+
+[cleanup]
+# Operation to perform. Use "dry-run" first to preview without destroying snapshots.
+# Allowed values: "dry-run" or "delete".
+command = "dry-run"
+
+# Text file containing one exact local ZFS dataset name per non-empty line.
+datasets_file = "datasets-example"
+
+# Text file containing syncoid hostnames, one per line. Blank lines and full-line
+# comments beginning with # are ignored in the hostname file.
+syncoid_hosts_file = "hostnames-example"
+
+# Optional age cutoff for snapshots and log groups. Use Nd, Nw, or Nm, where m is
+# treated as 30 days. Set to an empty string to disable the age cutoff.
+older_than = "7d"
+
+# Number of newest matching snapshots to protect per hostname/dataset, and newest
+# log timestamp groups to protect. Negative values are normalized to 0.
+retain_count = 10
+
+[logging]
+# Prefix used for generated .log and .err filenames. Empty uses the script basename.
+prefix = "CleanUpInSyncoidSnapshots"
+
+[report]
+# Optional human-readable title used at the top of email and as MQTT report title.
+title = "Syncoid snapshot cleanup"
+
+# Optional free-form comment included in email and MQTT status reports.
+comment = ""
+
+[mail]
+# Mail is completely optional. false disables all mail delivery.
+enabled = false
+
+# Recipient used only when enabled=true. The host must already have a working
+# `mail`/`mailx` command supporting -s and --attach.
+recipient = "you@example.com"
+
+# false = send mail only after failure. true = also send mail after success.
+on_success = false
+
+[mqtt]
+# MQTT is completely optional. false disables all MQTT publishing.
+enabled = false
+
+# MQTT broker hostname or IP address, without mqtt:// or mqtts://.
+host = "mqtt.example.lan"
+
+# MQTT broker TCP port. TLS does not automatically change this value.
+port = 1883
+
+# Exact publish topic. Publishing topics cannot contain + or # wildcards.
+topic = "homeassistant/CleanUpInSyncoidSnapshots/Zotac-RI531/status"
+
+# Optional broker username. Use an empty string if authentication is not required.
+username = "<String>"
+
+# Optional broker password as a plain TOML string. Use an empty string for no password.
+password = "<String>"
+
+# Optional MQTT client ID. Empty lets the MQTT client/broker choose one.
+client_id = ""
+
+# MQTT QoS for the final JSON report: 0, 1, or 2.
+qos = 1
+
+# Maximum seconds allowed for the isolated MQTT publisher process, including
+# DNS lookup, connection, and acknowledgement waits. Must be greater than zero.
+timeout = 15
+
+# Enable TLS certificate and hostname verification.
+tls = false
+
+# Optional CA certificate file. Empty uses system trust roots when tls=true.
+# Relative paths are resolved relative to this TOML file.
+ca_certs = ""
+
+# Optional client certificate for mutual TLS. certfile and keyfile must either
+# both be empty or both be configured, and they require tls=true.
+certfile = ""
+
+# Optional private key matching certfile. Encrypted-key passwords are not supported.
+keyfile = ""
+
+# By default dry-run reports are not published. Set true only if previews should
+# also send MQTT JSON status reports.
+publish_dry_run = false

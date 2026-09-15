@@ -1,10 +1,12 @@
 datasets
 hostnames
 mqtt-config.json
+config
 
 ! datasets-example
 ! hostnames-example
 ! mqtt-config-example.json
+! config-example.json
 
 logs/
 __pycache__/

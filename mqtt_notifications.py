@@ -25,49 +25,55 @@ DEFAULTS = {
 }
 
 
-def load_mqtt_config(path):
-    """Validate opt-in settings before cleanup; resolve certificate paths by config."""
-    with open(path, encoding="utf-8-sig") as stream:
-        supplied = json.load(stream)
+def validate_mqtt_config(supplied, base_dir):
+    """Validate MQTT settings supplied by the main TOML file."""
     if not isinstance(supplied, dict):
-        raise ValueError("MQTT config must be a JSON object")
+        raise ValueError("[mqtt] settings must be a TOML table")
     unknown = set(supplied) - (set(DEFAULTS) | {"host", "topic"})
     if unknown:
-        raise ValueError("MQTT config contains unknown options")
+        raise ValueError("[mqtt] contains unknown options")
     config = dict(DEFAULTS, **supplied)
     for key in ("host", "topic"):
         value = config.get(key)
         if not isinstance(value, str) or not value.strip() or "\x00" in value:
-            raise ValueError(f"MQTT {key} must be a nonempty string without NUL")
+            raise ValueError(f"mqtt.{key} must be a nonempty string without NUL")
+        config[key] = value.strip()
     if any(char in config["topic"] for char in "+#"):
-        raise ValueError("MQTT publish topic cannot contain + or # wildcards")
+        raise ValueError("mqtt.topic cannot contain + or # wildcards")
     if len(config["topic"].encode("utf-8")) > 65535:
-        raise ValueError("MQTT topic is too long")
+        raise ValueError("mqtt.topic is too long")
     for key, minimum, maximum in (("port", 1, 65535), ("qos", 0, 2)):
         if type(config[key]) is not int or not minimum <= config[key] <= maximum:
-            raise ValueError(f"MQTT {key} must be an integer from {minimum} to {maximum}")
+            raise ValueError(f"mqtt.{key} must be an integer from {minimum} to {maximum}")
     timeout = config["timeout"]
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
-        raise ValueError("MQTT timeout must be a finite positive number of seconds")
+        raise ValueError("mqtt.timeout must be a finite positive number of seconds")
     for key in ("tls", "publish_dry_run"):
         if type(config[key]) is not bool:
-            raise ValueError(f"MQTT {key} must be true or false")
+            raise ValueError(f"mqtt.{key} must be true or false")
     for key in ("username", "password", "ca_certs", "certfile", "keyfile"):
-        if config[key] is not None and not isinstance(config[key], str):
-            raise ValueError(f"MQTT {key} must be a string or null")
+        value = config[key]
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"mqtt.{key} must be a string")
+        if value == "":
+            config[key] = None
     if not isinstance(config["client_id"], str):
-        raise ValueError("MQTT client_id must be a string")
+        raise ValueError("mqtt.client_id must be a string")
     if config["password"] is not None and not config["username"]:
-        raise ValueError("MQTT password requires username")
+        raise ValueError("mqtt.password requires mqtt.username")
     if bool(config["certfile"]) != bool(config["keyfile"]):
-        raise ValueError("MQTT certfile and keyfile must be supplied together")
+        raise ValueError("mqtt.certfile and mqtt.keyfile must be supplied together")
+    base_dir = Path(base_dir).resolve()
     for key in ("ca_certs", "certfile", "keyfile"):
         if config[key]:
             if not config["tls"]:
-                raise ValueError(f"MQTT {key} requires tls=true")
-            certificate = Path(path).resolve().parent / config[key]
+                raise ValueError(f"mqtt.{key} requires mqtt.tls=true")
+            certificate = Path(config[key]).expanduser()
+            if not certificate.is_absolute():
+                certificate = base_dir / certificate
+            certificate = certificate.resolve()
             if not certificate.is_file():
-                raise ValueError(f"MQTT {key} file does not exist")
+                raise ValueError(f"mqtt.{key} file does not exist")
             config[key] = str(certificate)
     return config
 
@@ -150,7 +156,7 @@ def publish_worker():
 
 if __name__ == "__main__":
     if sys.argv[1:] != ["--publish"]:
-        sys.exit("Internal MQTT worker. Use CleanUpInSyncoidSnapshots.py --mqtt-config instead.")
+        sys.exit("Internal MQTT worker. Use CleanUpInSyncoidSnapshots.py -c CONFIG instead.")
     try:
         publish_worker()
     except Exception:

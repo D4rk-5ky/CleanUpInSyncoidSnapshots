@@ -1,195 +1,212 @@
 # CleanUpInSyncoidSnapshots
 
-Delete matching syncoid ZFS snapshots, preview deletions, manage log retention,
-and optionally send email and MQTT result notifications.
+CleanUpInSyncoidSnapshots removes matching Syncoid-created ZFS snapshots, can preview the exact deletion set first, prunes its own log groups with the same retention settings, and can optionally send email and MQTT JSON status reports.
 
-## Requirements and installation
+Current application version: **0.0.3**.
+
+## Requirements
 
 - Linux with ZFS and Python **3.10 or newer**.
-- Run both `delete` and `dry-run` as root. Help and version commands need no root access.
-- `zfs` must be on the executable search path.
-- Email requires a configured `mail` command supporting `-s` and `--attach`.
-- MQTT requires the optional Paho dependency in the Python interpreter used to run the script.
+- Run cleanup as root with `sudo`.
+- `zfs` must be available in `PATH`.
+- Python 3.10 needs the `tomli` compatibility package from `requirements.txt`; Python 3.11+ uses the standard-library `tomllib` module.
+- Email is optional and requires a configured `mail`/`mailx` command that supports `-s` and `--attach`.
+- MQTT is optional and requires Paho MQTT from `requirements-mqtt.txt`.
 
-Keep the Python files together. The script can run without Paho when MQTT is disabled.
-For MQTT, create a virtual environment in the extracted project directory:
+For Python 3.10, or when you prefer an isolated environment:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements-mqtt.txt
-cp mqtt-config-example.json mqtt-config.json
-chmod 600 mqtt-config.json
+.venv/bin/python -m pip install -r requirements.txt
 ```
 
-`venv` creates an isolated Python environment; `pip install` installs the optional
-MQTT library; `cp` makes your local settings file; `chmod 600` limits its access
-because it may contain a password. Edit the broker address, topic, and credentials
-in `mqtt-config.json` before use. Use `sudo .venv/bin/python` for MQTT-enabled runs.
-Without MQTT, use `sudo python3` instead.
+If MQTT will be enabled, install its optional dependency as well:
+
+```bash
+.venv/bin/python -m pip install -r requirements-mqtt.txt
+```
+
+`requirements-mqtt.txt` includes the base requirements automatically.
+
+## Configuration
+
+Copy the complete example and protect it because it can contain mail and MQTT credentials:
+
+```bash
+cp config-example.toml config.toml
+chmod 600 config.toml
+```
+
+Every runtime setting is in this TOML file. Relative filesystem paths are resolved relative to the TOML file itself, not the shell's current directory.
+
+The example defaults to `command = "dry-run"`, with both mail and MQTT disabled.
+
+### `[cleanup]`
+
+| Setting | Required/default | Meaning |
+| --- | --- | --- |
+| `command` | Required | `"dry-run"` previews candidates; `"delete"` performs snapshot destruction. |
+| `datasets_file` | Required | File containing one exact local ZFS dataset per non-empty line. |
+| `syncoid_hosts_file` | Required | File containing Syncoid hostnames, one per line. Blank lines and whole-line `#` comments are ignored. |
+| `older_than` | `""` | Optional age cutoff such as `7d`, `2w`, or `3m`. `m` means 30 days. Empty disables the age cutoff. |
+| `retain_count` | `0` | Protect the newest N matching snapshots per hostname/dataset and the newest N log timestamp groups. Negative values are normalized to 0 to preserve earlier behavior. |
+
+### `[logging]`
+
+| Setting | Required/default | Meaning |
+| --- | --- | --- |
+| `prefix` | Script basename | Prefix for generated `.log` and `.err` files. Empty uses the script basename. |
+
+The application prefers a `logs/` directory beside the script. If that location cannot be created or written, it falls back to a directory in the system temporary folder.
+
+### `[report]`
+
+| Setting | Required/default | Meaning |
+| --- | --- | --- |
+| `title` | `""` | Optional title written into email and used as MQTT report title. MQTT falls back to `CleanUpInSyncoidSnapshots` when blank. |
+| `comment` | `""` | Optional free-form comment included in email and MQTT reports. |
+
+### `[mail]`
+
+Mail is optional and disabled unless `enabled = true`.
+
+| Setting | Required/default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | Enables email delivery. |
+| `recipient` | `""` | Required to be non-empty when mail is enabled. |
+| `on_success` | `false` | `false` sends mail only on failure; `true` also sends mail after success. |
+
+Mail failure is logged but does not turn an otherwise successful cleanup into a fatal cleanup failure. When MQTT is enabled, such logged errors are reflected as `warning: true` in the final MQTT report.
+
+### `[mqtt]`
+
+MQTT is optional and disabled unless `enabled = true`.
+
+| Setting | Required/default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | Enables final MQTT JSON publishing. |
+| `host` | Required when enabled | Broker hostname or IP, without a URL scheme. |
+| `port` | `1883` | TCP port, 1-65535. TLS does not change the port automatically. |
+| `topic` | Required when enabled | Exact publish topic. `+` and `#` wildcards are rejected. |
+| `username` | `""` | Optional broker username. Empty means no username. |
+| `password` | `""` | Optional plain TOML string password, for example `password = "<String>"`. A non-empty password requires a username. |
+| `client_id` | `""` | Optional client ID. Empty lets the client/broker choose one. |
+| `qos` | `1` | MQTT QoS 0, 1, or 2. |
+| `timeout` | `15` | Positive maximum seconds for the isolated publisher process, including connection and acknowledgement waits. |
+| `tls` | `false` | Enables TLS certificate and hostname verification. |
+| `ca_certs` | `""` | Optional CA file. Empty uses system trust roots when TLS is enabled. |
+| `certfile` | `""` | Optional mutual-TLS client certificate. Requires `keyfile` and `tls = true`. |
+| `keyfile` | `""` | Optional matching private key. Requires `certfile` and `tls = true`. |
+| `publish_dry_run` | `false` | When `false`, dry-run reports are not published. Set `true` to publish previews too. |
+
+Certificate paths may be absolute or relative to the TOML file. MQTT messages are always published with `retain = false`. Credentials and report data are sent to the isolated publisher through standard input rather than command-line arguments. MQTT delivery failures are nonfatal and do not change the cleanup result.
 
 ## Dataset and hostname files
 
-Create `datasets.txt` with one exact local ZFS dataset name per line:
+Example dataset file:
 
 ```text
 tank/data
 tank/backups
 ```
 
-Blank dataset lines are ignored; comments are **not** supported in this file.
-List each dataset to process explicitly; the script does not request recursive listing.
-The original `datasets-example` is preserved for reference; replace its machine-specific
-names with valid datasets on your own system, including replacing its space-containing sample.
+Blank dataset lines are ignored. Dataset comments are not supported. The script processes only the explicitly listed datasets and does not ask ZFS for recursive dataset traversal.
 
-Create `hostnames.txt` with the hostnames recorded in your syncoid snapshot names:
+Example hostname file:
 
 ```text
-# Hostnames are matched exactly, including case.
+# Exact Syncoid hostnames
 backup-server
 laptop01
 ```
 
-Blank lines and whole-line `#` comments are ignored in the hostname file. Inline
-comments are not supported. The original `hostnames-example` is also included.
-An empty hostname list skips snapshot pruning; successful runs can still prune logs.
+Hostname matching is exact and case-sensitive. Blank lines and whole-line `#` comments are ignored. Inline comments are not supported.
 
-## Commands
+## Running the application
 
-Show all arguments or the current version:
+The public application CLI has exactly one runtime option:
 
-```bash
-python3 CleanUpInSyncoidSnapshots.py --help
-python3 CleanUpInSyncoidSnapshots.py --version
+```text
+-c CONFIG
 ```
 
-Preview using a seven-day cutoff while keeping at least ten snapshots per host:
+`-c CONFIG` points to the TOML configuration file. Cleanup mode, input files, retention, logging, email, report metadata, and MQTT settings all come from that file.
+
+Run it with:
 
 ```bash
-sudo python3 CleanUpInSyncoidSnapshots.py \
-  --command dry-run \
-  --datasets-file datasets.txt \
-  --syncoid-hosts-file hostnames.txt \
-  --older-than 7d --retain-count 10
+sudo python3 CleanUpInSyncoidSnapshots.py -c config.toml
 ```
 
-`dry-run` lists candidates without destroying snapshots or pruning existing log
-groups. It still creates logs, removes its empty error log, and can send email.
-MQTT reports from dry-runs are disabled by default.
-
-After reviewing the preview, run deletion with MQTT notifications:
+Or, when using the virtual environment:
 
 ```bash
-sudo .venv/bin/python CleanUpInSyncoidSnapshots.py \
-  --command delete \
-  --datasets-file datasets.txt \
-  --syncoid-hosts-file hostnames.txt \
-  --older-than 7d --retain-count 10 \
-  --mqtt-config mqtt-config.json \
-  --backup-title "Zotac RI531 - Syncoid cleanup" \
-  --backup-comment "Cleanup after daily replication"
+sudo .venv/bin/python CleanUpInSyncoidSnapshots.py -c config.toml
 ```
 
-To use count-only retention, omit `--older-than` and keep a positive
-`--retain-count`. To use age-only retention, omit `--retain-count` and specify
-`--older-than`. MQTT is independent of email; omit `--mqtt-config` to disable it.
+No other public operational flags are accepted. If `-c` is omitted or an old CLI option is supplied, argument parsing exits before cleanup starts.
 
-This complete option example previews cleanup and enables email on success and failure:
+## Recommended workflow
 
-```bash
-sudo .venv/bin/python CleanUpInSyncoidSnapshots.py \
-  -c dry-run -d datasets.txt -s hostnames.txt \
-  -o 7d -r 10 -l Zotac-Cleanup \
-  -m you@example.com -mos \
-  -bt "Zotac RI531 - Syncoid cleanup" \
-  -bc "Cleanup after daily replication" \
-  --mqtt-config mqtt-config.json
+First configure:
+
+```toml
+[cleanup]
+command = "dry-run"
 ```
 
-`--help` and `--version` exit immediately instead of running cleanup.
+Run the application and review every listed candidate. When the preview is correct, change only:
 
-### All CLI options
+```toml
+command = "delete"
+```
 
-| Option | Short form | Behavior/default |
-| --- | --- | --- |
-| `--help` | `-h` | Print argument help and exit. |
-| `--version` | None | Print application version and exit. |
-| `--command {delete,dry-run}` | `-c` | Required. Delete matching candidates or preview them. |
-| `--datasets-file FILE` | `-d` | Required. Dataset list described above. |
-| `--syncoid-hosts-file FILE` | `-s` | Required. Exact syncoid hostname list. |
-| `--older-than Nd/Nw/Nm` | `-o` | Optional age limit: days, weeks, or 30-day months. |
-| `--retain-count N` | `-r` | Keep newest N per hostname/dataset and N log timestamp groups; default 0. Negative values are treated as 0. |
-| `--log-prefix TEXT` | `-l` | Log filename prefix; default script basename. Use a plain filename prefix without path separators or wildcard characters. |
-| `--send-mail EMAIL` | `-m` | Enable email on failure; disabled by default. |
-| `--mail-on-success` | `-mos` | Also email on successful runs; needs `--send-mail`. |
-| `--backup-title TEXT` | `-bt` | Email heading and MQTT `title`; defaults to empty, with app-name fallback for MQTT. |
-| `--backup-comment TEXT` | `-bc` | Email comment and MQTT `comment`; default empty. |
-| `--mqtt-config FILE` | None | Enable final MQTT reports using a JSON settings file; disabled by default. |
+Then run the same `-c config.toml` command again.
 
 ## Retention behavior
 
-Snapshot names must match `syncoid_<hostname>_YYYY-MM-DD:HH:MM:SS-GMT[+/-]HH:MM`.
-An omitted positive offset sign is accepted. Other names are ignored; malformed
-timestamps are logged and skipped. Sorting and age comparisons use the timestamp
-in the name, converted to UTC, rather than ZFS's creation property.
+Snapshot names must match:
 
-The newest `--retain-count` snapshots are protected separately for each hostname
-within each dataset. If an age limit is supplied, only unprotected snapshots
-strictly older than the cutoff are candidates. Without an age limit, all
-unprotected matching snapshots are candidates.
+```text
+<dataset>@syncoid_<hostname>_YYYY-MM-DD:HH:MM:SS-GMT[+/-]HH:MM
+```
 
-**With no age limit and a retain count of zero, `delete` deletes every matching
-snapshot.** Always choose retention values deliberately and review `dry-run` output.
-For snapshots, `0d`, `0w`, and `0m` currently behave like an omitted cutoff;
-for logs, zero age uses the current time as the cutoff. Prefer a positive age.
-These are existing application behaviors.
+A positive timezone offset without an explicit `+` is also accepted, matching the earlier implementation. Nonmatching snapshots are ignored. A matching snapshot with a malformed timestamp is logged and skipped.
 
-Logs are grouped by filename timestamp (`.log` and `.err` together). Retention
-uses local time, keeps the newest N timestamp groups, and applies the same optional
-age constraint. With no age and zero count, log pruning does nothing. A zero-age
-log cutoff can include the current run's logs when no group is retained.
-ZFS command failures stop subsequent dataset processing; earlier deletions are not undone.
+Snapshots are grouped by configured hostname within each dataset and sorted newest-first by the timestamp embedded in the snapshot name, normalized to UTC.
 
-## MQTT configuration
+- `retain_count > 0` always protects the newest N matching snapshots for each hostname/dataset.
+- With `older_than` configured, only unprotected snapshots strictly older than the cutoff are candidates.
+- With no `older_than`, every unprotected matching snapshot is a candidate.
+- Therefore, `older_than = ""` together with `retain_count = 0` means every matching snapshot is selected for deletion in `delete` mode. Use `dry-run` first.
+- Existing behavior for `0d`, `0w`, and `0m` is preserved: for snapshot pruning, a zero-duration value acts like no cutoff because a zero `timedelta` is falsey in the existing cleanup code.
 
-Use `mqtt-config-example.json` as the full configuration reference. This file
-configures MQTT only; dataset selection, retention, and email remain CLI options.
-JSON booleans must be `true`/`false`, and absent optional values can be `null`.
-Unknown configuration keys are rejected before cleanup starts.
+Each snapshot is destroyed individually with:
 
-| JSON key | Default | Meaning |
-| --- | --- | --- |
-| `host` | Required | MQTT broker hostname or IP, without a URL scheme. |
-| `topic` | Required | Exact publish topic; cannot contain subscription wildcards `+` or `#`. |
-| `port` | `1883` | Broker TCP port, 1–65535. Set explicitly to `8883` if your TLS listener uses that port. |
-| `username` | `null` | Optional broker username. |
-| `password` | `null` | Optional password; requires a nonempty username. |
-| `client_id` | `""` | Empty lets the client/broker assign an ID. Otherwise choose a unique ID for concurrent jobs. |
-| `qos` | `1` | MQTT delivery level: 0, 1, or 2. QoS 1 waits for broker acknowledgement; duplicate delivery is possible. |
-| `timeout` | `15` | Positive seconds allowed for the publishing worker, including connection and acknowledgements. |
-| `tls` | `false` | Use TLS with certificate and hostname verification. |
-| `ca_certs` | `null` | CA file for TLS; null uses system trust roots. |
-| `certfile` | `null` | Optional client certificate file for mutual TLS; requires `keyfile`. |
-| `keyfile` | `null` | Client private key file; requires `certfile`. Encrypted-key passwords are not supported. |
-| `publish_dry_run` | `false` | Explicitly allow reports from previews. Use a separate test topic when enabling this. |
+```text
+zfs destroy SNAPSHOT
+```
 
-Certificate paths are relative to the JSON file, or absolute. Certificate options
-require `tls: true`. TLS does not change the port automatically. Publish transport
-is MQTT 3.1.1 over TCP (with optional TLS). Messages always use `retain: false`,
-so an old completion message is not deliberately stored for future subscribers.
-Existing retained messages from other publishers are not cleared.
+No recursive or force flags are added. A checked ZFS command failure stops subsequent processing; deletions already completed are not rolled back.
 
-MQTT uses [Eclipse Paho's single-message publisher](https://eclipse.dev/paho/files/paho.mqtt.python/html/helpers.html).
-Credentials are passed to its worker through standard input, not command-line arguments.
-Use TLS when credentials or error details need protection in transit.
+## Log retention behavior
 
-### Report format
+`.log` and `.err` files sharing the same timestamp are treated as one log group. Successful `delete` runs prune eligible groups after snapshot processing. `dry-run` never removes old log groups, but it reports which ones would be removed.
 
-Example successful report:
+Log retention uses the same `older_than` and `retain_count` settings as snapshot retention. With both disabled, log pruning does nothing. Log timestamps use local time. The current run's empty `.err` file is removed at the end.
+
+## Root requirement
+
+Actual cleanup and dry-run execution both require root. The guard runs before reading dataset/hostname files or issuing ZFS commands. If root is missing, the application logs the error, optionally mails it, optionally reports it through MQTT, and exits with code 1.
+
+## MQTT report format
+
+A final MQTT message is JSON with these fields:
 
 ```json
 {
   "status": "success",
-  "title": "Zotac RI531 - Syncoid cleanup",
+  "title": "Syncoid snapshot cleanup",
   "name": "CleanUpInSyncoidSnapshots",
   "job": "CleanUpInSyncoidSnapshots",
   "exit_code": 0,
@@ -198,138 +215,36 @@ Example successful report:
   "stderr": "",
   "command": "delete",
   "dry_run": false,
-  "comment": "Cleanup after daily replication",
-  "version": "0.0.1",
+  "comment": "",
+  "version": "0.0.3",
   "timestamp": "2026-09-15T12:00:00+00:00"
 }
 ```
 
-| Field | Meaning |
-| --- | --- |
-| `status` | Exactly `success` or `failure`, matching the supplied automation. |
-| `title` | `--backup-title`, or `CleanUpInSyncoidSnapshots` if blank. |
-| `name` | Application name, for the automation's title fallback. |
-| `job` | Log prefix, also usable as an automation title fallback. |
-| `exit_code` | Application exit code: 0 on completion, 1 on ordinary fatal errors or root rejection, 130 on a caught keyboard interrupt. |
-| `warning` | JSON boolean: true when the run logged errors, including nonfatal mail/log-pruning errors or skipped bad timestamps. |
-| `error` | Fatal error description, or empty string on success. A failed ZFS command's own return code appears here. |
-| `stderr` | Last 4096 characters of a failed command's stderr, falling back to stdout; empty when unavailable. |
-| `command`, `dry_run` | Requested command and a JSON boolean identifying previews. |
-| `comment` | `--backup-comment`. |
-| `version` | Current application version. |
-| `timestamp` | Report creation time in UTC, including the timezone offset. |
+`status` is `success` only for exit code 0. `warning` becomes true when error-level messages were logged during an otherwise successful MQTT-enabled run. Fatal command diagnostics include up to the last 4096 characters of stderr, or stdout if stderr is empty.
 
-With MQTT enabled, one final report is attempted after cleanup, email, and log
-finalization, including caught failures and root rejection. Success means the
-run completed; it can also mean no snapshots matched. Nonfatal errors can produce
-`success` with `warning: true`, as understood by your automation.
+## Home Assistant example
 
-MQTT delivery failure is reported to the error logger/console and does not change
-the cleanup exit code. If current log files were removed during finalization,
-that diagnostic may only remain on the console; capture stderr in your scheduler.
-The script does not send a second status after delivery failure, queue reports
-for later runs, or retry after its timeout. Broker acknowledgement is not proof
-that a Home Assistant action completed.
+`home-assistant/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml` is a receive-only Home Assistant automation blueprint. Configure its MQTT topic to exactly match `[mqtt].topic` in your TOML file.
 
-CLI parsing/configuration failures happen before cleanup and do not send MQTT.
-Startup/import errors, power loss, forced termination, and an unavailable broker
-can also prevent notification. Missing Paho is reported as a delivery failure.
-For testing MQTT, set `publish_dry_run: true` with a dedicated test topic, then
-run the existing dry-run command with `--mqtt-config`.
+The blueprint can independently show clean success, success-with-warning, failure, and dry-run notifications, and can either replace the previous notification or create separate notifications. It does not publish commands, start cleanup, or invoke ZFS.
 
-## Home Assistant blueprint example
+## Project files
 
-The release includes:
+- `CleanUpInSyncoidSnapshots.py` - application entry point and original cleanup/email/log lifecycle.
+- `config_loader.py` - TOML loading, validation, path resolution, and conversion into the existing runtime values.
+- `config-example.toml` - complete commented configuration example containing every supported setting.
+- `mqtt_notifications.py` - optional MQTT validation, report construction, bounded publishing, and internal worker.
+- `requirements.txt` - Python 3.10 TOML compatibility dependency.
+- `requirements-mqtt.txt` - optional MQTT dependency plus base requirements.
+- `datasets-example`, `hostnames-example` - input-file examples.
+- `home-assistant/` - receive-only Home Assistant MQTT notification blueprint.
+- `tests/test_project.py` - regression tests with ZFS/mail mocked and optional loopback MQTT integration tests.
+- `commented_code_map.md` - current function and command map.
+- `VERSIONING.md` - release-by-release change record.
+- `VERIFICATION.md` - verification evidence and limits for this release.
+- `DISCLAIMER.md` - safety/liability notice.
 
-```text
-home-assistant/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml
-```
+## Safety notes
 
-It is an **automation blueprint** that subscribes to this application's final MQTT
-JSON report and creates a Home Assistant persistent notification. It does not run
-cleanup, publish MQTT commands, or control any ZFS/backup operation.
-
-Copy the file below Home Assistant's blueprint directory, for example:
-
-```text
-/config/blueprints/automation/CleanUpInSyncoidSnapshots/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml
-```
-
-Then reload automations or restart Home Assistant, open
-**Settings → Automations & scenes → Blueprints**, and create an automation from
-**CleanUpInSyncoidSnapshots - MQTT persistent notification**.
-
-Set **MQTT status topic** to the exact `topic` in this application's
-`mqtt-config.json`. The packaged default matches the example config:
-
-```text
-homeassistant/CleanUpInSyncoidSnapshots/Zotac-RI531/status
-```
-
-The blueprint validates that the received JSON identifies
-`CleanUpInSyncoidSnapshots` and has `status` equal to `success` or `failure`. It
-then distinguishes these outcomes:
-
-- clean success → green-check success title;
-- success with `warning: true` → warning title and a reminder to inspect logs;
-- failure → failure title plus `error` and `stderr` when supplied;
-- dry-run → identified as a preview, when dry-run MQTT publishing is enabled.
-
-Blueprint inputs let you independently suppress clean-success, warning, failure,
-or dry-run notifications. By default it reuses one Home Assistant
-`notification_id`, so the newest report replaces the previous persistent
-notification. Disable **Replace previous notification** if every report should
-remain separately dismissible. If several hosts/jobs use the blueprint with
-replacement enabled, assign each automation a different notification ID.
-
-Persistent notifications are Home Assistant frontend notifications; they are not
-mobile push notifications. The blueprint uses only the MQTT integration and the
-`persistent_notification.create` action.
-
-### Reusing an existing combined backup automation
-
-If you prefer to keep cleanup reporting inside an existing Syncerate/backup
-automation instead of using the blueprint, subscribe that automation to the
-cleanup topic separately from the backup status topics. For example:
-
-```yaml
-- trigger: mqtt
-  id: cleanup_status
-  topic: homeassistant/CleanUpInSyncoidSnapshots/Zotac-RI531/status
-```
-
-The report fields in the previous section are deliberately compatible with a
-success/failure parser. Do not substitute a backup-control topic for this cleanup
-status topic. A status trigger only reports completion; it does not make fixed
-delays in another automation wait for cleanup. Change that sequencing separately
-if shutdown or another job must wait for cleanup completion.
-
-## Email and logs
-
-`--send-mail` emails failures; add `--mail-on-success` for both outcomes.
-`--backup-title` and `--backup-comment` appear in the body, without replacing
-the subject. Subjects are `Syncoid cleanup SUCCESS - logs attached`,
-`Syncoid cleanup FAILED - logs attached`, or the special root-rejection subject.
-The newest `.log` and nonempty `.err` for the prefix are attached and included
-in the body. Concurrent runs sharing a prefix may therefore select another run's logs.
-Email is sent before log pruning, so its result does not include later pruning
-or MQTT delivery errors.
-
-Logs use `<prefix>-Date-YYYY-MM-DD_HH_MM_SS.log` and `.err`.
-The script prefers its own `logs` directory and falls back to the system temporary
-directory under the script basename when needed. Console output shows INFO/errors;
-the main log also records DEBUG command output. Empty error logs are removed.
-Root rejection still creates logs and attempts requested notifications.
-
-## Verification command
-
-```bash
-.venv/bin/python -B -m unittest discover -s tests -v
-```
-
-This runs safe tests with ZFS and email mocked. With Paho installed, loopback
-broker tests exercise actual MQTT packets, rejection, and timeout. Those tests
-are skipped if Paho is unavailable. `-B` prevents Python bytecode cache creation.
-No test targets a real dataset or sends email.
-
-See [DISCLAIMER.md](DISCLAIMER.md) for the original project notices.
+This application can destroy ZFS snapshots. Review `DISCLAIMER.md`, keep independent backups, use `dry-run` before `delete`, and verify the configured dataset, hostname, retention, and path values before running against important data.

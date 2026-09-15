@@ -11,6 +11,66 @@ The application version is `__version__` in CleanUpInSyncoidSnapshots.py.
 The supplied archive had no version identifier or version history. It is the
 unversioned baseline; 0.0.1 is the first numbered release, with no invented prior releases.
 
+## 0.0.3 — 2026-09-15
+
+### Configuration and CLI changes
+
+- Replace the operational multi-flag CLI with one required public option: `-c CONFIG`.
+- Move cleanup mode, dataset/hostname file paths, retention, log prefix, report metadata,
+  email settings, and all MQTT settings into one TOML configuration file.
+- Add `config-example.toml` containing every supported setting with inline comments.
+- Default the example to `command = "dry-run"`, `mail.enabled = false`, and
+  `mqtt.enabled = false` so copying the example does not enable destructive cleanup
+  or notification delivery by itself.
+- Resolve configured input files and MQTT certificate/key paths relative to the TOML
+  file when paths are not absolute.
+- Reject unknown TOML sections/options and invalid required values before any cleanup
+  logging, mail, MQTT publishing, or ZFS command is started.
+- Preserve the earlier negative-retain behavior by normalizing negative
+  `cleanup.retain_count` values to zero.
+- Preserve the original `Nd`/`Nw`/`Nm` age syntax and 30-day month behavior.
+
+### MQTT and mail changes
+
+- Replace the separate MQTT JSON configuration path with the `[mqtt]` TOML section.
+- Keep MQTT opt-in through `mqtt.enabled`; the existing bounded worker, non-retained
+  publish behavior, QoS handling, TLS/auth support, dry-run publish opt-in, report
+  schema, and nonfatal delivery failure policy remain in place.
+- Support plain TOML string credentials, including `password = "<String>"`.
+- Normalize empty optional MQTT strings to disabled/absent values where the previous
+  JSON configuration used `null`.
+- Move email enablement, recipient, and success-notification policy into `[mail]`.
+- Keep mail disabled unless explicitly enabled, and keep mail delivery failures nonfatal.
+
+### Compatibility, documentation, and packaging changes
+
+- Bump the application/package version to 0.0.3.
+- Add `config_loader.py` so TOML parsing/validation is isolated from destructive ZFS logic.
+- Keep Python 3.10 compatibility through `tomli`; Python 3.11+ uses standard `tomllib`.
+- Add `requirements.txt` for the Python 3.10 TOML compatibility dependency and make
+  `requirements-mqtt.txt` include the base requirements before Paho MQTT.
+- Remove obsolete `mqtt-config-example.json`; its settings are now represented in
+  `config-example.toml`.
+- Update the Home Assistant blueprint description to point at `[mqtt].topic` in TOML.
+- Rewrite README.md for current TOML-only usage and document the single remaining
+  public CLI option plus every TOML setting.
+- Update commented_code_map.md for all current functions, test helpers, commands, and files.
+- Expand regression coverage for TOML schema completeness, config-relative paths,
+  CLI rejection of old flags, mail opt-in validation, plain-string MQTT passwords,
+  and lifecycle behavior through the new config path.
+
+### Preserved safety behavior
+
+Snapshot matching, exact-host filtering, nonrecursive `zfs list`, one-at-a-time checked
+`zfs destroy`, root enforcement, dry-run destruction protection, retention rules, log
+pruning rules, error propagation, optional mail behavior, and MQTT result reporting
+remain routed through the existing cleanup functions. No shell invocation was added.
+
+### Verification
+
+See VERIFICATION.md for completed compile/tests, CLI checks, manifest comparison, and
+remaining environment limitations.
+
 ## 0.0.2 — 2026-09-15
 
 ### Application/package changes
