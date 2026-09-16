@@ -8,12 +8,11 @@ import argparse
 import glob
 import sys
 from typing import List, Tuple, Optional
-import tempfile
 from config_loader import load_config, parse_older_than
 from mqtt_notifications import build_mqtt_report, notify_mqtt
 
 
-__version__ = "0.0.3"
+__version__ = "0.0.4"
 
 
 class ReportWarningHandler(logging.Handler):
@@ -80,30 +79,17 @@ def setup_logger(log_folder: str, log_date: str, prefix: str) -> Tuple[logging.L
     return logger, error_logger, err_filepath
 
 
-def pick_log_folder(script_log_folder: str, tmp_name: str) -> str:
+def get_script_log_folder() -> str:
+    """Create and return the fixed ``logs`` directory beside this script.
+
+    Log placement is intentionally deterministic: the application never falls back
+    to /tmp or the current working directory. If the script directory is not
+    writable, directory creation raises an error instead of silently moving logs.
     """
-    Log folder selection policy:
-      1) Prefer <script_dir>/logs if it is writable or can be created (root OR non-root)
-      2) Fall back to /tmp/<tmp_name>
-    """
-    tmp_folder = os.path.join(tempfile.gettempdir(), tmp_name)
-
-    def _ensure_writable(path: str) -> bool:
-        try:
-            os.makedirs(path, exist_ok=True)
-            test_path = os.path.join(path, ".write_test")
-            with open(test_path, "w", encoding="utf-8") as f:
-                f.write("ok")
-            os.remove(test_path)
-            return True
-        except Exception:
-            return False
-
-    if _ensure_writable(script_log_folder):
-        return script_log_folder
-
-    os.makedirs(tmp_folder, exist_ok=True)
-    return tmp_folder
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    log_folder = os.path.join(script_dir, "logs")
+    os.makedirs(log_folder, exist_ok=True)
+    return log_folder
 
 
 
@@ -576,8 +562,6 @@ def main():
 
 def run_cleanup(args, state):
     """Run the original cleanup lifecycle; expose final diagnostics for MQTT."""
-    default_script_name = script_base_name()
-
     prefix = args.log_prefix
     retain_count = max(int(args.retain_count or 0), 0)
     older_than = args.older_than  # Optional[datetime.timedelta]
@@ -586,11 +570,9 @@ def run_cleanup(args, state):
 
     log_date = datetime.datetime.now().strftime('%Y-%m-%d_%H_%M_%S')
 
-    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-    preferred_log_folder = os.path.join(SCRIPT_DIR, "logs")
-    
-    # tmp fallback folder also uses script name (unique per script)
-    log_folder = pick_log_folder(preferred_log_folder, tmp_name=default_script_name)
+    # Logs always live in <actual script directory>/logs. The directory is created
+    # automatically; failure to create it is fatal rather than silently relocating logs.
+    log_folder = get_script_log_folder()
 
     logger, error_logger, err_filepath = setup_logger(log_folder, log_date, prefix)
     state.update(error_logger=error_logger, err_filepath=err_filepath)

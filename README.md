@@ -2,7 +2,7 @@
 
 CleanUpInSyncoidSnapshots removes matching Syncoid-created ZFS snapshots, can preview the exact deletion set first, prunes its own log groups with the same retention settings, and can optionally send email and MQTT JSON status reports.
 
-Current application version: **0.0.3**.
+Current application version: **0.0.4**.
 
 ## Requirements
 
@@ -57,7 +57,7 @@ The example defaults to `command = "dry-run"`, with both mail and MQTT disabled.
 | --- | --- | --- |
 | `prefix` | Script basename | Prefix for generated `.log` and `.err` files. Empty uses the script basename. |
 
-The application prefers a `logs/` directory beside the script. If that location cannot be created or written, it falls back to a directory in the system temporary folder.
+The application always creates and uses a `logs/` directory beside the actual `CleanUpInSyncoidSnapshots.py` file. It never falls back to `/tmp` or the current working directory. If that directory cannot be created or written, the run fails instead of silently placing logs somewhere else.
 
 ### `[report]`
 
@@ -216,7 +216,7 @@ A final MQTT message is JSON with these fields:
   "command": "delete",
   "dry_run": false,
   "comment": "",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "timestamp": "2026-09-15T12:00:00+00:00"
 }
 ```

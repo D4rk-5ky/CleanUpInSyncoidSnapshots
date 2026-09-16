@@ -11,6 +11,33 @@ The application version is `__version__` in CleanUpInSyncoidSnapshots.py.
 The supplied archive had no version identifier or version history. It is the
 unversioned baseline; 0.0.1 is the first numbered release, with no invented prior releases.
 
+## 0.0.4 — 2026-09-16
+
+### Log directory fix
+
+- Fix log placement so every run creates and uses `logs/` beside the actual
+  `CleanUpInSyncoidSnapshots.py` file.
+- Remove the old `/tmp/<script-name>` fallback. A permissions/filesystem error while
+  creating the script-local `logs/` directory now fails visibly instead of silently
+  relocating logs.
+- Resolve the script location with `os.path.realpath(__file__)`, so invoking the program
+  through a symlink still places logs beside the actual script file.
+- Keep existing `.log`/`.err` naming, log retention, mail attachments, and cleanup
+  behavior unchanged; they now all operate against the deterministic script-local folder.
+- Add regression coverage that verifies `logs/` is created beside the actual script.
+- Update README.md, `config-example.toml`, commented_code_map.md, VERIFICATION.md, and
+  package metadata for 0.0.4.
+
+### Preserved behavior
+
+TOML configuration, the single `-c CONFIG` CLI, snapshot matching/deletion safety,
+dry-run protection, retention rules, optional mail, and MQTT reporting are unchanged.
+
+### Verification
+
+See VERIFICATION.md for compile/tests, CLI checks, fixed log-location regression, and
+release-package verification.
+
 ## 0.0.3 — 2026-09-15
 
 ### Configuration and CLI changes

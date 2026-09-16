@@ -356,7 +356,7 @@ class LifecycleTests(unittest.TestCase):
                 (folder / "datasets.txt").unlink()
             stack.enter_context(patch.object(sys, "argv", ["cleanup", "-c", str(config_path)]))
             stack.enter_context(patch.object(app.os, "geteuid", return_value=0 if root else 1000, create=True))
-            stack.enter_context(patch.object(app, "pick_log_folder", return_value=directory))
+            stack.enter_context(patch.object(app, "get_script_log_folder", return_value=directory))
             error_logger = logging.Logger("test-errors")
             error_logger.addHandler(logging.NullHandler())
             stack.enter_context(patch.object(app, "setup_logger", return_value=(Mock(), error_logger, str(folder / "absent.err"))))
@@ -434,6 +434,38 @@ class LifecycleTests(unittest.TestCase):
                 app.main()
             self.assertEqual(caught.exception.code, 2)
             cleanup.assert_not_called()
+
+
+class LoggingLocationTests(unittest.TestCase):
+    def test_logs_are_created_beside_actual_script_without_tmp_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            script_dir = Path(directory) / "scripts"
+            script_dir.mkdir()
+            fake_script = script_dir / "CleanUpInSyncoidSnapshots.py"
+            fake_script.write_text("# test\n", encoding="utf-8")
+            launcher_dir = Path(directory) / "bin"
+            launcher_dir.mkdir()
+            launcher = launcher_dir / "cleanup"
+            launcher.symlink_to(fake_script)
+
+            with patch.object(app, "__file__", str(launcher)):
+                log_folder = Path(app.get_script_log_folder())
+                logger, error_logger, err_path = app.setup_logger(
+                    str(log_folder), "2026-09-16_17_00_00", "cleanup"
+                )
+                logger.info("normal log test")
+                error_logger.error("error log test")
+
+                for current_logger in (logger, error_logger):
+                    for handler in list(current_logger.handlers):
+                        handler.close()
+                        current_logger.removeHandler(handler)
+
+            self.assertEqual(log_folder, script_dir / "logs")
+            self.assertTrue(log_folder.is_dir())
+            self.assertEqual(Path(err_path).parent, log_folder)
+            self.assertTrue((log_folder / "cleanup-Date-2026-09-16_17_00_00.log").is_file())
+            self.assertTrue((log_folder / "cleanup-Date-2026-09-16_17_00_00.err").is_file())
 
 
 class RetentionTests(unittest.TestCase):

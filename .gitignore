@@ -1,7 +1,7 @@
 datasets
 hostnames
 mqtt-config.json
-config
+config*
 
 ! datasets-example
 ! hostnames-example
