@@ -26,6 +26,7 @@ retain_count = 10
 
 [logging]
 # Prefix used for generated .log and .err filenames. Empty uses the script basename.
+# All log files are always stored in a `logs/` directory beside the actual script.
 prefix = "CleanUpInSyncoidSnapshots"
 
 [report]

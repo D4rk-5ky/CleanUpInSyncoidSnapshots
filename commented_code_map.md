@@ -1,4 +1,4 @@
-# Commented code map — CleanUpInSyncoidSnapshots 0.0.3
+# Commented code map — CleanUpInSyncoidSnapshots 0.0.4
 
 This file explains the current implementation. It is not a version history; release changes belong in `VERSIONING.md`.
 
@@ -11,9 +11,8 @@ This file explains the current implementation. It is not a version history; rele
 | `ReportWarningHandler.emit` | Sets `state["warning"] = True`; it deliberately does not duplicate message output. |
 | `setup_logger` | Creates the main DEBUG-file/INFO-console logger and separate ERROR-file/ERROR-console logger, returning the error-file path for final empty-file cleanup. |
 | `setup_logger._build_logger` | Shared nested helper that resets an existing named logger, applies the formatter, and attaches the requested handlers so repeated test/app invocations do not accumulate handlers. |
-| `pick_log_folder` | Prefers `<script_dir>/logs`; falls back to a temporary directory only when the preferred path cannot be created/written. |
-| `pick_log_folder._ensure_writable` | Creates a candidate directory and writes/removes a small probe file to verify actual write access before choosing it. |
-| `script_base_name` | Produces a filesystem-safe basename from the script filename for default log naming and temporary-folder naming. |
+| `get_script_log_folder` | Resolves the actual directory containing `CleanUpInSyncoidSnapshots.py`, creates its `logs/` child directory, and always returns that path. There is deliberately no `/tmp` fallback so log location is deterministic and permission failures are visible. |
+| `script_base_name` | Produces a filesystem-safe basename from the script filename for default log naming. |
 | `CommandError` | Carries failed command, return code, stdout, and stderr so failures retain useful diagnostics for logging and MQTT reporting. |
 | `CommandError.__init__` | Stores command diagnostics and builds the human-readable failure message. |
 | `run_cmd` | Executes ZFS commands without a shell, captures stdout/stderr, logs details, and raises `CommandError` on checked nonzero exit. Keeping argv as a list avoids shell interpolation. |

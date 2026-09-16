@@ -1,18 +1,18 @@
-# Verification — CleanUpInSyncoidSnapshots 0.0.3
+# Verification — CleanUpInSyncoidSnapshots 0.0.4
 
-Verified on 2026-09-15 in the release workspace using Python 3.13.5.
+Verified on 2026-09-16 in the release workspace using Python 3.13.5.
 The application targets Linux/ZFS. Destructive ZFS operations were not run.
 
 ## Automated results
 
-- **40 tests run: 37 passed and 3 skipped.**
+- **41 tests run: 38 passed and 3 skipped.**
 - The three skipped tests are the optional real-Paho loopback MQTT integration tests
   because `paho-mqtt` is not installed in this verification environment.
-- TOML schema/default/path tests passed, including exact coverage of every supported
-  setting in `config-example.toml`.
-- The packaged example loads as `dry-run` with mail and MQTT disabled.
-- The plain TOML MQTT credential form `password = "<String>"` is covered by regression
-  testing.
+- A new log-location regression confirms that the program resolves the actual script
+  through a symlink, creates `<actual-script-dir>/logs/`, and creates both the `.log`
+  and `.err` files inside that folder.
+- TOML schema/default/path tests passed, including coverage of every supported setting
+  in `config-example.toml`.
 - Lifecycle tests passed for normal success, MQTT-disabled operation, root rejection,
   command failure diagnostics, missing input files, finalization failure, nonfatal mail
   failure/warning reporting, keyboard interrupt, and invalid config rejection.
@@ -23,49 +23,30 @@ The application targets Linux/ZFS. Destructive ZFS operations were not run.
 
 - `CleanUpInSyncoidSnapshots.py`, `config_loader.py`, `mqtt_notifications.py`, and
   `tests/test_project.py` compiled successfully in memory without generating bytecode.
-- Importing the application reports `__version__ == "0.0.3"`.
+- Importing the application reports `__version__ == "0.0.4"`.
 - Running the main script with no options exits 2 and shows required usage
   `CleanUpInSyncoidSnapshots.py -c CONFIG`.
 - Supplying an old operational option such as `--command dry-run` exits 2 with an
   `unrecognized arguments` error; cleanup is not entered.
-- Supplying `-c` with a missing TOML file exits 2 during configuration loading before
-  cleanup starts.
-- The public main application parser defines only `-c CONFIG`. The MQTT helper's
-  `--publish` argument remains an internal worker entry point and is not a public cleanup flag.
+- The public main application parser still exposes only `-c CONFIG`.
 
-## TOML/configuration checks
+## Log-location fix checks
 
-- `config-example.toml` contains exactly the supported `[cleanup]`, `[logging]`,
-  `[report]`, `[mail]`, and `[mqtt]` sections.
-- Every supported setting is present in the example and has an adjacent explanatory comment.
-- Relative dataset, hostname, and MQTT certificate/key paths resolve against the TOML
-  file directory.
-- Unknown sections/options and wrong required types are rejected before `run_cleanup`.
-- Mail remains opt-in with `mail.enabled = false` by default.
-- MQTT remains opt-in with `mqtt.enabled = false` by default.
-- The separate `mqtt-config-example.json` was intentionally removed because MQTT now
-  uses the unified TOML configuration.
+- `get_script_log_folder()` uses `os.path.realpath(__file__)` and therefore anchors
+  logging to the actual script file rather than the current working directory or a
+  symlink launcher directory.
+- The directory is always `<actual-script-dir>/logs` and is created with
+  `os.makedirs(..., exist_ok=True)`.
+- There is no `/tmp` or other temporary-directory fallback in the application.
+- If the script-local log directory cannot be created, the run raises an error instead
+  of silently relocating its log files.
+- Existing log filenames, `.log`/`.err` pairing, retention, and mail attachment lookup
+  still use the same resolved `log_folder`.
 
-## Home Assistant check
+## 0.0.3-to-0.0.4 manifest comparison
 
-The packaged blueprint was parsed successfully as YAML with a verification loader that
-recognizes Home Assistant's `!input` tag. It remains receive-only: regression checks
-confirm an MQTT trigger and `persistent_notification.create` action while finding no
-MQTT publish action or ZFS destroy command.
-
-## Original-to-release manifest comparison
-
-The 0.0.2 input archive contained **14 files**. The 0.0.3 release contains **16 files**.
-
-Added:
-
-- `config-example.toml`
-- `config_loader.py`
-- `requirements.txt`
-
-Removed/replaced:
-
-- `mqtt-config-example.json` — replaced by the unified commented `config-example.toml`.
+The 0.0.3 input archive contained **16 files**. The 0.0.4 release also contains
+**16 files**. No project file was added or removed.
 
 Changed intentionally:
 
@@ -74,32 +55,13 @@ Changed intentionally:
 - `VERIFICATION.md`
 - `VERSIONING.md`
 - `commented_code_map.md`
-- `home-assistant/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml`
-- `mqtt_notifications.py`
-- `requirements-mqtt.txt`
+- `config-example.toml`
 - `tests/test_project.py`
 
-Preserved byte-for-byte from the 0.0.2 input archive:
+Preserved byte-for-byte from 0.0.3:
 
 - `.github/CODEOWNERS`
 - `DISCLAIMER.md`
-- `datasets-example`
-- `hostnames-example`
-
-No other original file is missing.
-
-## Final archive manifest
-
-Archive root: `CleanUpInSyncoidSnapshots-0.0.3/`. **16 files**:
-
-- `.github/CODEOWNERS`
-- `CleanUpInSyncoidSnapshots.py`
-- `DISCLAIMER.md`
-- `README.md`
-- `VERIFICATION.md`
-- `VERSIONING.md`
-- `commented_code_map.md`
-- `config-example.toml`
 - `config_loader.py`
 - `datasets-example`
 - `home-assistant/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml`
@@ -107,24 +69,23 @@ Archive root: `CleanUpInSyncoidSnapshots-0.0.3/`. **16 files**:
 - `mqtt_notifications.py`
 - `requirements-mqtt.txt`
 - `requirements.txt`
-- `tests/test_project.py`
 
 ## Packaging checks
 
-The release archive is checked for ZIP CRC integrity and byte-for-byte equality against
-its release source tree after extraction. The ZIP must contain no `__pycache__`, `.pyc`,
-`.pyo`, virtual environment, logs, build/cache directories, local credential/config files,
-or temporary verification files. A SHA-256 sidecar is generated for the final ZIP.
+The final archive is checked for ZIP CRC integrity and byte-for-byte equality against
+its release source tree after extraction. It must contain no `__pycache__`, `.pyc`,
+`.pyo`, virtual environment, generated `logs/`, build/cache directories, local credential
+files, or temporary verification files. A SHA-256 sidecar is generated for the ZIP.
 
 ## What was not fully tested
 
 - No real `zfs destroy` was executed; destructive ZFS behavior is covered with mocks and
-  the original command construction/selection logic was retained.
+  its existing command construction/selection logic is unchanged.
 - No real mail server or host `mail` delivery was exercised.
 - `paho-mqtt` is not installed here, so the three real loopback QoS/rejection/timeout
-  integration tests were skipped. The worker/auth/TLS/timeout paths are still covered by mocks.
+  integration tests were skipped. MQTT worker/auth/TLS/timeout paths remain covered by mocks.
 - No production MQTT broker or credentials were used.
-- Home Assistant itself was not installed, so the blueprint was parsed and structurally
-  tested but not imported/executed in a live Home Assistant instance.
+- Home Assistant itself was not installed, so the automation/blueprint was parsed and
+  structurally tested rather than executed in a live instance.
 - Python 3.10 is not installed in this workspace, so the `tomli` fallback could not be
   executed directly here; Python 3.13 uses standard `tomllib`.
