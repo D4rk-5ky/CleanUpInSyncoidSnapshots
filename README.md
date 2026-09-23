@@ -2,7 +2,7 @@
 
 CleanUpInSyncoidSnapshots removes matching Syncoid-created ZFS snapshots, can preview the exact deletion set first, prunes its own log groups with the same retention settings, and can optionally send email and MQTT JSON status reports.
 
-Current application version: **0.0.4**.
+Current application version: **0.0.5**.
 
 ## Requirements
 
@@ -76,7 +76,9 @@ Mail is optional and disabled unless `enabled = true`.
 | `recipient` | `""` | Required to be non-empty when mail is enabled. |
 | `on_success` | `false` | `false` sends mail only on failure; `true` also sends mail after success. |
 
-Mail failure is logged but does not turn an otherwise successful cleanup into a fatal cleanup failure. When MQTT is enabled, such logged errors are reflected as `warning: true` in the final MQTT report.
+For runtime failures after the TOML configuration has loaded, enabled failure email and enabled MQTT are attempted independently. A normal failure email includes the current logs. If a failure happens before the log system is available, the program falls back to a minimal failure email without attachments so mail is still attempted. A mail-delivery problem does not suppress the MQTT attempt, and an MQTT-delivery problem does not suppress email.
+
+Mail failure is logged but does not turn an otherwise successful cleanup into a fatal cleanup failure. When MQTT is enabled, such logged errors are reflected as `warning: true` in the final MQTT report. Configuration/argument parsing errors occur before a valid runtime configuration exists, so notification settings cannot safely be used for those errors.
 
 ### `[mqtt]`
 
@@ -97,9 +99,9 @@ MQTT is optional and disabled unless `enabled = true`.
 | `ca_certs` | `""` | Optional CA file. Empty uses system trust roots when TLS is enabled. |
 | `certfile` | `""` | Optional mutual-TLS client certificate. Requires `keyfile` and `tls = true`. |
 | `keyfile` | `""` | Optional matching private key. Requires `certfile` and `tls = true`. |
-| `publish_dry_run` | `false` | When `false`, dry-run reports are not published. Set `true` to publish previews too. |
+| `publish_dry_run` | `false` | Controls clean successful dry-run reports only. Fatal dry-run failures are still published whenever MQTT is enabled; set `true` to publish successful previews too. |
 
-Certificate paths may be absolute or relative to the TOML file. MQTT messages are always published with `retain = false`. Credentials and report data are sent to the isolated publisher through standard input rather than command-line arguments. MQTT delivery failures are nonfatal and do not change the cleanup result.
+Certificate paths may be absolute or relative to the TOML file. MQTT messages are always published with `retain = false`. Credentials and report data are sent to the isolated publisher through standard input rather than command-line arguments. MQTT delivery failures are nonfatal and do not change the cleanup result. A successful final publish is logged as `MQTT report sent successfully`; a failed or timed-out publish is logged as `MQTT notification failed: ...` without echoing broker credentials.
 
 ## Dataset and hostname files
 
@@ -191,7 +193,7 @@ No recursive or force flags are added. A checked ZFS command failure stops subse
 
 ## Log retention behavior
 
-`.log` and `.err` files sharing the same timestamp are treated as one log group. Successful `delete` runs prune eligible groups after snapshot processing. `dry-run` never removes old log groups, but it reports which ones would be removed.
+`.log` and `.err` files sharing the same timestamp are treated as one log group. Successful `delete` runs prune eligible groups after snapshot processing. `dry-run` never removes old log groups, but it reports which ones would be removed. If log-retention finalization itself raises an exception, that late runtime failure still triggers an enabled failure email attempt and an MQTT failure report.
 
 Log retention uses the same `older_than` and `retain_count` settings as snapshot retention. With both disabled, log pruning does nothing. Log timestamps use local time. The current run's empty `.err` file is removed at the end.
 
@@ -216,12 +218,12 @@ A final MQTT message is JSON with these fields:
   "command": "delete",
   "dry_run": false,
   "comment": "",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "timestamp": "2026-09-15T12:00:00+00:00"
 }
 ```
 
-`status` is `success` only for exit code 0. `warning` becomes true when error-level messages were logged during an otherwise successful MQTT-enabled run. Fatal command diagnostics include up to the last 4096 characters of stderr, or stdout if stderr is empty.
+`status` is `success` only for exit code 0. `warning` becomes true when error-level messages were logged during an otherwise successful MQTT-enabled run. Fatal command diagnostics include up to the last 4096 characters of stderr, or stdout if stderr is empty. Fatal runtime exceptions are re-raised after notification attempts, so service managers still receive a nonzero process result while enabled email and MQTT can also receive the failure report.
 
 ## Home Assistant example
 

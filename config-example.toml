@@ -44,7 +44,10 @@ enabled = false
 # `mail`/`mailx` command supporting -s and --attach.
 recipient = "you@example.com"
 
-# false = send mail only after failure. true = also send mail after success.
+# false = send mail on runtime failure only. true = also send mail after success.
+# Failure mail and MQTT are attempted independently when both are enabled. If a
+# runtime failure happens before log setup completes, failure mail is sent without
+# log attachments rather than being silently skipped.
 on_success = false
 
 [mqtt]
@@ -69,7 +72,8 @@ password = "<String>"
 # Optional MQTT client ID. Empty lets the MQTT client/broker choose one.
 client_id = ""
 
-# MQTT QoS for the final JSON report: 0, 1, or 2.
+# MQTT QoS for the final JSON report: 0, 1, or 2. Fatal runtime errors publish a
+# failure report when MQTT is enabled; a successful publish is confirmed in the log.
 qos = 1
 
 # Maximum seconds allowed for the isolated MQTT publisher process, including
@@ -90,6 +94,7 @@ certfile = ""
 # Optional private key matching certfile. Encrypted-key passwords are not supported.
 keyfile = ""
 
-# By default dry-run reports are not published. Set true only if previews should
-# also send MQTT JSON status reports.
+# By default clean successful dry-run reports are not published. Fatal dry-run
+# failures are still published whenever MQTT itself is enabled, so errors are not
+# hidden by this preview-noise setting. Set true to publish successful previews too.
 publish_dry_run = false

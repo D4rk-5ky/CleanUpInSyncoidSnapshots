@@ -12,7 +12,7 @@ from config_loader import load_config, parse_older_than
 from mqtt_notifications import build_mqtt_report, notify_mqtt
 
 
-__version__ = "0.0.4"
+__version__ = "0.0.5"
 
 
 class ReportWarningHandler(logging.Handler):
@@ -293,6 +293,62 @@ def MailTo(
     WasMailSent(logger, error_logger, mail_exit_code, stderr_output)
 
 
+def send_failure_mail_if_needed(args, failure, state) -> None:
+    """Ensure a runtime failure gets one failure-mail attempt when mail is enabled.
+
+    Normal cleanup failures already send their log-attached failure mail inside
+    ``run_cleanup`` and mark that attempt in shared state. This helper covers failures
+    outside that block, including log finalization and very early runtime setup.
+    When loggers exist it reuses ``MailTo`` so attachments are preserved; otherwise
+    it falls back to a minimal no-attachment message.
+    """
+    if not args.send_mail or state.get("failure_mail_attempted"):
+        return
+
+    state["failure_mail_attempted"] = True
+    logger = state.get("logger")
+    error_logger = state.get("error_logger")
+    log_folder = state.get("log_folder")
+    prefix = state.get("prefix")
+
+    if logger and error_logger and log_folder and prefix:
+        try:
+            MailTo(
+                logger,
+                error_logger,
+                recipient=args.send_mail,
+                log_folder=log_folder,
+                prefix=prefix,
+                subject="Syncoid cleanup FAILED - logs attached",
+                intro=f"Cleanup failed. Error: {failure}",
+                backup_title=args.backup_title,
+                backup_comment=args.backup_comment,
+            )
+        except Exception as mail_e:
+            error_logger.error(f"Failed to send late failure notification mail: {mail_e}")
+        return
+
+    body = build_backup_mail_header(args.backup_title, args.backup_comment)
+    body += "Cleanup failed before the normal log-attached failure report could be prepared.\n\n"
+    body += f"Error: {failure}\n"
+
+    try:
+        mail_exit_code, stderr_output = send_mail(
+            "Syncoid cleanup FAILED - early runtime error",
+            body,
+            args.send_mail,
+            attachment_files=None,
+        )
+        if mail_exit_code == 0:
+            print("Failure mail was sent successfully (without log attachments).", file=sys.stderr)
+        else:
+            print("There was an error sending the fallback failure mail.", file=sys.stderr)
+            if stderr_output:
+                print(stderr_output, file=sys.stderr)
+    except Exception as mail_e:
+        print(f"Failed to send fallback failure mail: {mail_e}", file=sys.stderr)
+
+
 
 def parse_syncoid_ts(ts: str) -> datetime.datetime:
     """
@@ -550,10 +606,27 @@ def main():
         failure = exc
         raise
     finally:
-        # Report only after existing mail and log cleanup have finished.
+        # A runtime failure can happen before run_cleanup reaches its normal
+        # log-attached failure-mail block. In that case, still attempt the enabled
+        # email channel before MQTT. Each channel is independent: a mail problem
+        # must never suppress the MQTT attempt, and vice versa.
+        if exit_code != 0 and args.send_mail:
+            send_failure_mail_if_needed(args, failure, state)
+
+        # MQTT is the final status report and is attempted for every completed
+        # runtime lifecycle when enabled, including fatal exceptions.
         if mqtt_config is not None:
+            logger = state.get("logger")
+            if logger:
+                log_blank_line(logger)
+                logger.info("Preparing MQTT report...")
             report = build_mqtt_report(args, __version__, exit_code, failure, state.get("warning", False))
-            notify_mqtt(mqtt_config, report, state.get("error_logger"))
+            notify_mqtt(
+                mqtt_config,
+                report,
+                state.get("error_logger"),
+                logger,
+            )
         warning_handler = state.get("warning_handler")
         if warning_handler:
             state["error_logger"].removeHandler(warning_handler)
@@ -575,7 +648,13 @@ def run_cleanup(args, state):
     log_folder = get_script_log_folder()
 
     logger, error_logger, err_filepath = setup_logger(log_folder, log_date, prefix)
-    state.update(error_logger=error_logger, err_filepath=err_filepath)
+    state.update(
+        logger=logger,
+        error_logger=error_logger,
+        err_filepath=err_filepath,
+        log_folder=log_folder,
+        prefix=prefix,
+    )
     if args.mqtt_config:
         warning_handler = ReportWarningHandler(state)
         error_logger.addHandler(warning_handler)
@@ -591,6 +670,7 @@ def run_cleanup(args, state):
 
         try:
             if args.send_mail:
+                state["failure_mail_attempted"] = True
                 MailTo(
                     logger,
                     error_logger,
@@ -641,12 +721,14 @@ def run_cleanup(args, state):
         success = True
 
     except Exception as e:
+        success = False
         error_logger.error(f"Fatal error: {e}")
         raise
 
     finally:
         try:
             if args.send_mail and not success:
+                state["failure_mail_attempted"] = True
                 MailTo(
                     logger,
                     error_logger,

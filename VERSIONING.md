@@ -11,6 +11,51 @@ The application version is `__version__` in CleanUpInSyncoidSnapshots.py.
 The supplied archive had no version identifier or version history. It is the
 unversioned baseline; 0.0.1 is the first numbered release, with no invented prior releases.
 
+## 0.0.5 — 2026-09-23
+
+### Failure notification reliability
+
+- Fix the runtime failure-notification lifecycle so enabled email and MQTT are attempted
+  independently for fatal errors after a valid TOML configuration has loaded.
+- Preserve the normal log-attached failure email for cleanup/ZFS errors, including the
+  reported `zfs list ... dataset does not exist` failure pattern.
+- Add a fallback failure email path for runtime errors that occur before normal logger/mail
+  finalization is available. The fallback deliberately sends no attachments rather than
+  silently skipping email.
+- Keep fatal exceptions/nonzero service results intact: notifications are attempted first,
+  then the original exception still propagates.
+- Preserve the existing log-retention ordering, but add late-failure handling so a
+  retention/finalization exception still triggers an enabled failure-email attempt and
+  an MQTT failure report.
+- Make MQTT delivery outcome observable: `notify_mqtt` now returns a success boolean and
+  writes `MQTT report sent successfully` to the main log after a successful isolated publish.
+  Failure/timeout behavior remains nonfatal and continues to avoid echoing credentials.
+- Treat `mqtt.publish_dry_run = false` as suppression of clean successful previews only.
+  Fatal dry-run failures are now still published when MQTT is enabled, so preview mode cannot
+  hide an error report.
+
+### Tests and documentation
+
+- Add regression coverage proving a fatal ZFS command error attempts both enabled failure
+  email and MQTT and includes command stderr in the MQTT report.
+- Add regression coverage for early runtime failures before logger setup and for late
+  finalization failures that still must attempt failure mail and MQTT.
+- Add coverage for the positive MQTT-delivery log/return value and for failed dry-runs that
+  must publish even when clean preview reports are disabled.
+- Update README.md, `config-example.toml`, commented_code_map.md, VERIFICATION.md, and
+  package metadata for 0.0.5.
+
+### Preserved safety behavior
+
+Snapshot selection, exact hostname matching, one-snapshot-at-a-time `zfs destroy`, dry-run
+protection, TOML validation, retention rules, non-retained MQTT publishing, and the single
+public `-c CONFIG` CLI remain intact.
+
+### Verification
+
+See VERIFICATION.md for compile/tests, CLI checks, notification regression coverage, and
+release-package verification.
+
 ## 0.0.4 — 2026-09-16
 
 ### Log directory fix
