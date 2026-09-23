@@ -97,10 +97,24 @@ def build_mqtt_report(args, version, exit_code, error=None, warning=False):
     }
 
 
-def notify_mqtt(config, report, error_logger=None):
-    """Send one final report without altering cleanup's exit status on delivery failure."""
-    if config is None or (report["dry_run"] and not config["publish_dry_run"]):
-        return
+def notify_mqtt(config, report, error_logger=None, logger=None):
+    """Send one final report without altering cleanup's exit status on delivery failure.
+
+    Return ``True`` only when the isolated publisher exits successfully. This lets
+    callers/tests distinguish an attempted-and-confirmed publish from a logged
+    delivery failure without changing the cleanup exit code.
+    """
+    if config is None:
+        return False
+    # publish_dry_run controls routine successful previews only. A failed dry-run
+    # must still report failure when MQTT is enabled, otherwise exactly the runs
+    # that need attention can disappear silently.
+    if (
+        report["dry_run"]
+        and not config["publish_dry_run"]
+        and report.get("status") != "failure"
+    ):
+        return False
     try:
         # stdin keeps credentials and report content out of the process command line.
         # A worker gives even DNS/connect/acknowledgement stalls a firm timeout.
@@ -116,6 +130,9 @@ def notify_mqtt(config, report, error_logger=None):
         if result.returncode:
             # Do not echo subprocess output: a library error might include credentials.
             raise RuntimeError("publisher failed; check paho-mqtt installation, broker, credentials and TLS settings")
+        if logger:
+            logger.info("MQTT report sent successfully")
+        return True
     except Exception as exc:
         reason = "publisher timed out" if isinstance(exc, subprocess.TimeoutExpired) else (
             str(exc) if isinstance(exc, RuntimeError) else "could not start MQTT publisher"
@@ -125,6 +142,7 @@ def notify_mqtt(config, report, error_logger=None):
             error_logger.error(message)
         else:
             print(message, file=sys.stderr)
+        return False
 
 
 def publish_worker():

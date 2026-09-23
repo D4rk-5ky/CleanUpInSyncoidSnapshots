@@ -1,4 +1,4 @@
-# Commented code map — CleanUpInSyncoidSnapshots 0.0.4
+# Commented code map — CleanUpInSyncoidSnapshots 0.0.5
 
 This file explains the current implementation. It is not a version history; release changes belong in `VERSIONING.md`.
 
@@ -24,11 +24,12 @@ This file explains the current implementation. It is not a version history; rele
 | `WasMailSent` | Logs whether the external mail command succeeded; mail failure itself remains nonfatal to the cleanup result. |
 | `build_backup_mail_header` | Builds the optional title/comment block shared by success and failure email bodies. |
 | `MailTo` | Collects the newest log/error files, assembles body text, calls `send_mail`, and records delivery outcome. |
+| `send_failure_mail_if_needed` | Ensures an enabled runtime failure gets one failure-mail attempt. It reuses `MailTo` with attachments when logger state exists, otherwise falls back to a minimal no-attachment email, and marks the attempt so the same failure is not mailed twice and cannot block MQTT. |
 | `parse_syncoid_ts` | Parses Syncoid's timestamp suffix including signed or signless positive GMT offsets and returns a timezone-aware datetime for safe UTC comparison. |
 | `delete_syncoid_snapshots` | Lists snapshots for one explicit dataset, matches only configured Syncoid hosts, sorts newest-first, applies retain/age protection, previews or destroys selected snapshots one at a time, and stops on checked ZFS failures. |
 | `delete_old_files` | Applies the existing shared retention policy to timestamp-paired `.log`/`.err` groups. In dry-run it only reports candidates. |
-| `main` | Public entry point. Parses only `-c CONFIG`, loads/validates TOML before cleanup, runs the existing lifecycle, preserves exit/exception behavior, and sends one optional final MQTT report after finalization. |
-| `run_cleanup` | Existing cleanup lifecycle reused by the TOML interface: logger setup, root guard, input-file loading, dry-run/delete processing, optional mail, log retention, and empty `.err` cleanup. |
+| `main` | Public entry point. Parses only `-c CONFIG`, loads/validates TOML before cleanup, preserves exit/exception behavior, attempts fallback failure mail for early runtime failures when enabled, and independently attempts the final MQTT report before re-raising fatal exceptions. |
+| `run_cleanup` | Cleanup lifecycle reused by the TOML interface: logger setup, root guard, input-file loading, dry-run/delete processing, log retention/finalization, optional success/failure mail, and empty `.err` cleanup. Late finalization exceptions are surfaced to `main`, which ensures a separate failure-mail attempt and MQTT failure report without changing snapshot-retention behavior. |
 | Imported `parse_older_than` | Re-exported from `config_loader.py` so existing callers/tests can still use `CleanUpInSyncoidSnapshots.parse_older_than` while parsing logic lives with configuration validation. |
 
 ## `config_loader.py`
@@ -53,7 +54,7 @@ This file explains the current implementation. It is not a version history; rele
 | `DEFAULTS` | MQTT defaults for port, credentials, client ID, QoS, timeout, TLS paths, and dry-run publishing. |
 | `validate_mqtt_config` | Validates the enabled `[mqtt]` TOML settings, rejects unknown/wrong types and wildcard publish topics, normalizes empty optional strings to absent values, enforces username/password and certificate/key relationships, and resolves certificate files relative to the TOML directory. |
 | `build_mqtt_report` | Produces the stable Home Assistant-facing JSON schema using cleanup result, report metadata, warning state, command, version, and bounded command diagnostics. |
-| `notify_mqtt` | Skips disabled/dry-run-suppressed reports, then starts a separate Python worker with config/report on stdin and a hard timeout. Publisher failure is logged but cannot change the cleanup exit result. |
+| `notify_mqtt` | Skips disabled MQTT and clean successful dry-run reports when preview publishing is disabled, but never suppresses a failed dry-run. It then starts a separate Python worker with config/report on stdin and a hard timeout. It returns `True` only when the worker exits successfully, logs `MQTT report sent successfully` when the main logger is available, and logs delivery failure without changing the cleanup exit result. |
 | `publish_worker` | Internal Paho one-shot MQTT 3.1.1 publisher. Builds auth/TLS context, publishes with configured QoS, and always uses `retain=False`. |
 | `if __name__ == "__main__"` worker gate | Accepts only the internal `--publish` argument. This is not a public application option; normal users run `CleanUpInSyncoidSnapshots.py -c CONFIG`. Unexpected worker arguments exit immediately. |
 
@@ -100,8 +101,10 @@ This file explains the current implementation. It is not a version history; rele
 | `test_fallback_title_and_output_limit` | Confirms blank title fallback and 4096-character diagnostic bound. |
 | `test_disabled_and_default_dry_run_do_not_launch_worker` | Confirms disabled MQTT and default dry-run suppression do no publish work. |
 | `test_worker_input_and_timeout` | Confirms secrets are not placed on the worker command line and timeout is applied. |
-| `test_dry_run_requires_explicit_publish_opt_in` | Confirms dry-run publishing requires `publish_dry_run=true`. |
+| `test_dry_run_requires_explicit_publish_opt_in` | Confirms clean successful dry-run publishing requires `publish_dry_run=true`. |
+| `test_failed_dry_run_is_published_even_when_successful_previews_are_disabled` | Confirms a failed dry-run is still sent when MQTT is enabled even if routine preview reports are disabled. |
 | `test_delivery_failure_is_logged_and_secret_not_echoed` | Confirms publisher failures are nonfatal and worker stderr is not copied into logs where credentials could leak. |
+| `test_successful_delivery_is_logged_when_main_logger_is_available` | Confirms a successful worker return is exposed as `True` and writes the positive MQTT delivery confirmation to the main log. |
 | `test_timeout_is_nonfatal` | Confirms a stuck publisher is bounded and only logged. |
 | `test_worker_tls_and_auth` | Verifies Paho receives the configured TLS context and username/password. |
 
@@ -123,10 +126,13 @@ This file explains the current implementation. It is not a version history; rele
 | `test_original_mode_needs_no_mqtt` | Confirms disabled MQTT performs no MQTT call and cleanup still runs. |
 | `test_root_rejection_reports_failure` | Confirms root guard stops before ZFS and is reported as failure when MQTT is enabled. |
 | `test_command_failure_reports_stderr` | Confirms a ZFS command failure remains the raised error and reaches MQTT diagnostics. |
+| `test_command_failure_attempts_both_enabled_email_and_mqtt` | Reproduces the reported fatal ZFS-command pattern and confirms one failure email plus one failure MQTT report are both attempted when enabled. |
 | `test_missing_input_reports_failure_before_zfs` | Confirms missing dataset files fail before any ZFS command. |
 | `test_finalization_failure_cannot_report_success` | Confirms log-finalization failure cannot be mislabeled successful. |
+| `test_finalization_failure_still_attempts_failure_email` | Confirms a retention/finalization exception still gets an enabled failure-email attempt and a failure MQTT report. |
 | `test_mail_warning_is_nonfatal` | Confirms mail failure leaves cleanup successful but sets MQTT warning. |
 | `test_interrupt_is_never_success` | Confirms keyboard interrupt reports exit 130/failure. |
+| `test_early_runtime_failure_still_attempts_enabled_mail_and_mqtt` | Confirms a failure before logger setup still triggers the fallback failure email and an independent MQTT failure report. |
 | `test_invalid_config_stops_before_cleanup` | Confirms enabled MQTT with incomplete settings is rejected during config parsing, before `run_cleanup`. |
 
 ### `RetentionTests`
