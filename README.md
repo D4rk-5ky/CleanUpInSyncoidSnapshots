@@ -2,7 +2,7 @@
 
 CleanUpInSyncoidSnapshots removes matching Syncoid-created ZFS snapshots, can preview the exact deletion set first, prunes its own log groups with the same retention settings, and can optionally send email and MQTT JSON status reports.
 
-Current application version: **0.0.4**.
+Current application version: **0.0.6**.
 
 ## Requirements
 
@@ -46,7 +46,7 @@ The example defaults to `command = "dry-run"`, with both mail and MQTT disabled.
 | Setting | Required/default | Meaning |
 | --- | --- | --- |
 | `command` | Required | `"dry-run"` previews candidates; `"delete"` performs snapshot destruction. |
-| `datasets_file` | Required | File containing one exact local ZFS dataset per non-empty line. |
+| `datasets_file` | Required | File containing one exact local ZFS dataset per non-empty line. A listed dataset that ZFS explicitly reports as nonexistent is recorded as a failure, but later listed datasets are still processed. |
 | `syncoid_hosts_file` | Required | File containing Syncoid hostnames, one per line. Blank lines and whole-line `#` comments are ignored. |
 | `older_than` | `""` | Optional age cutoff such as `7d`, `2w`, or `3m`. `m` means 30 days. Empty disables the age cutoff. |
 | `retain_count` | `0` | Protect the newest N matching snapshots per hostname/dataset and the newest N log timestamp groups. Negative values are normalized to 0 to preserve earlier behavior. |
@@ -110,7 +110,7 @@ tank/data
 tank/backups
 ```
 
-Blank dataset lines are ignored. Dataset comments are not supported. The script processes only the explicitly listed datasets and does not ask ZFS for recursive dataset traversal.
+Blank dataset lines are ignored. Dataset comments are not supported. The script processes only the explicitly listed datasets and does not ask ZFS for recursive dataset traversal. If `zfs list` explicitly reports `dataset does not exist` for one configured dataset, that dataset is recorded as missing and the script continues with the remaining configured datasets. The overall run still finishes as a failure.
 
 Example hostname file:
 
@@ -124,27 +124,41 @@ Hostname matching is exact and case-sensitive. Blank lines and whole-line `#` co
 
 ## Running the application
 
-The public application CLI has exactly one runtime option:
+The application has one operational CLI setting: which TOML configuration file to load. Standard help is also available.
 
-```text
--c CONFIG
-```
+| Flag | Required | What it does |
+| --- | --- | --- |
+| `-c CONFIG` | Yes for a cleanup run | Selects the TOML configuration file. |
+| `--config CONFIG` | Yes for a cleanup run | Long-form alias for `-c CONFIG`; it loads the same TOML file. |
+| `-h`, `--help` | No | Shows the built-in CLI help and examples, then exits without starting cleanup. |
 
-`-c CONFIG` points to the TOML configuration file. Cleanup mode, input files, retention, logging, email, report metadata, and MQTT settings all come from that file.
+The configuration selector only chooses the TOML file. Cleanup mode, input files, retention, logging, email, report metadata, and MQTT settings all come from that file.
 
-Run it with:
+Run it with the short option:
 
 ```bash
 sudo python3 CleanUpInSyncoidSnapshots.py -c config.toml
 ```
 
-Or, when using the virtual environment:
+Or use the equivalent long option:
+
+```bash
+sudo python3 CleanUpInSyncoidSnapshots.py --config /etc/cleanup-syncoid/config.toml
+```
+
+When using the documented virtual environment:
 
 ```bash
 sudo .venv/bin/python CleanUpInSyncoidSnapshots.py -c config.toml
 ```
 
-No other public operational flags are accepted. If `-c` is omitted or an old CLI option is supplied, argument parsing exits before cleanup starts.
+To display help without running cleanup:
+
+```bash
+python3 CleanUpInSyncoidSnapshots.py --help
+```
+
+No other public operational flags are accepted. For example, `--command dry-run` is rejected because `command = "dry-run"` belongs in the TOML file. If no configuration option is supplied, argument parsing exits before cleanup starts.
 
 ## Recommended workflow
 
@@ -187,7 +201,7 @@ Each snapshot is destroyed individually with:
 zfs destroy SNAPSHOT
 ```
 
-No recursive or force flags are added. A checked ZFS command failure stops subsequent processing; deletions already completed are not rolled back.
+No recursive or force flags are added. A checked `zfs destroy` failure, or a `zfs list` failure other than the explicit `dataset does not exist` diagnostic, remains fatal and stops subsequent processing; deletions already completed are not rolled back. A missing configured dataset is the one exception: it is recorded, later datasets are still processed, and the final run remains failed.
 
 ## Log retention behavior
 
@@ -198,6 +212,18 @@ Log retention uses the same `older_than` and `retain_count` settings as snapshot
 ## Root requirement
 
 Actual cleanup and dry-run execution both require root. The guard runs before reading dataset/hostname files or issuing ZFS commands. If root is missing, the application logs the error, optionally mails it, optionally reports it through MQTT, and exits with code 1.
+
+## Missing configured datasets
+
+When ZFS returns the explicit diagnostic `dataset does not exist` while listing snapshots for a configured dataset, the application treats it as a recoverable-per-dataset but failed-overall condition:
+
+- the missing dataset is written to the `.err` log;
+- processing continues with every later dataset in `datasets_file`;
+- if mail is enabled, the final mail uses the normal **FAILED** subject and states that the failure was caused by one or more missing datasets;
+- the process exits with code `1`;
+- the MQTT JSON contract is unchanged: `status` is still `"failure"`, `exit_code` is still `1`, and the existing `error` and `stderr` fields identify the missing dataset and preserve the ZFS diagnostic.
+
+This special handling applies only to the explicit missing-dataset diagnostic. Permission errors, pool/I/O errors, unexpected ZFS failures, and snapshot-destroy failures remain immediately fatal as before.
 
 ## MQTT report format
 
@@ -216,7 +242,7 @@ A final MQTT message is JSON with these fields:
   "command": "delete",
   "dry_run": false,
   "comment": "",
-  "version": "0.0.4",
+  "version": "0.0.6",
   "timestamp": "2026-09-15T12:00:00+00:00"
 }
 ```
@@ -244,7 +270,8 @@ The blueprint can independently show clean success, success-with-warning, failur
 - `VERSIONING.md` - release-by-release change record.
 - `VERIFICATION.md` - verification evidence and limits for this release.
 - `DISCLAIMER.md` - safety/liability notice.
+- `.gitignore` - excludes local runtime configs, generated logs, Python caches, virtual environments, and build outputs while keeping the shipped example tracked.
 
 ## Safety notes
 
-This application can destroy ZFS snapshots. Review `DISCLAIMER.md`, keep independent backups, use `dry-run` before `delete`, and verify the configured dataset, hostname, retention, and path values before running against important data.
+This application can destroy ZFS snapshots. Review the included [DISCLAIMER.md](DISCLAIMER.md), keep independent backups, use `dry-run` before `delete`, and verify the configured dataset, hostname, retention, and path values before running against important data.

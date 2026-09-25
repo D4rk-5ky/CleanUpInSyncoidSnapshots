@@ -1,6 +1,8 @@
 # CleanUpInSyncoidSnapshots configuration example.
-# Copy this file to e.g. config.toml, edit it, and run:
+# Copy this file to e.g. config.toml, edit it, and run with either equivalent flag:
 #   sudo python3 CleanUpInSyncoidSnapshots.py -c config.toml
+#   sudo python3 CleanUpInSyncoidSnapshots.py --config config.toml
+# Use -h/--help to show the CLI help without starting cleanup.
 #
 # Relative filesystem paths in this file are resolved relative to this TOML file.
 
@@ -10,6 +12,8 @@
 command = "dry-run"
 
 # Text file containing one exact local ZFS dataset name per non-empty line.
+# If ZFS explicitly reports one listed dataset as nonexistent, later datasets are
+# still processed, but the final run/mail/MQTT result remains a failure.
 datasets_file = "datasets-example"
 
 # Text file containing syncoid hostnames, one per line. Blank lines and full-line

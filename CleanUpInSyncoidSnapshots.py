@@ -12,7 +12,7 @@ from config_loader import load_config, parse_older_than
 from mqtt_notifications import build_mqtt_report, notify_mqtt
 
 
-__version__ = "0.0.4"
+__version__ = "0.0.6"
 
 
 class ReportWarningHandler(logging.Handler):
@@ -107,6 +107,28 @@ class CommandError(RuntimeError):
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
+
+
+class MissingDatasetsError(RuntimeError):
+    """Final non-success result after one or more configured ZFS datasets were absent.
+
+    Missing datasets are collected so later configured datasets can still be processed.
+    The final exception deliberately carries ``stderr`` because the existing MQTT report
+    builder already exposes that field without changing the JSON success/failure contract.
+    """
+
+    def __init__(self, datasets: List[str], stderr_messages: List[str]):
+        self.datasets = list(datasets)
+        self.stderr = "\n".join(message for message in stderr_messages if message).strip()
+        names = ", ".join(self.datasets)
+        super().__init__(
+            f"Missing ZFS dataset(s): {names}. Other configured datasets were still processed."
+        )
+
+
+def is_missing_dataset_error(error: CommandError) -> bool:
+    """Return True only for ZFS's explicit 'dataset does not exist' diagnostic."""
+    return "dataset does not exist" in (error.stderr or "").lower()
 
 
 def run_cmd(
@@ -502,15 +524,23 @@ def delete_old_files(
 def main():
     default_script_name = script_base_name()
 
-    # The application intentionally exposes only one runtime option: -c CONFIG.
-    # All cleanup, retention, mail, report, logging, and MQTT behavior lives in TOML.
+    # The application intentionally exposes one operational setting on the CLI:
+    # which TOML file to load. Standard -h/--help is available for discoverability;
+    # all cleanup, retention, mail, report, logging, and MQTT behavior lives in TOML.
     parser = argparse.ArgumentParser(
         description="Delete matching syncoid ZFS snapshots using one TOML configuration file.",
         usage="%(prog)s -c CONFIG",
-        add_help=False,
+        epilog=(
+            "Examples:\n"
+            "  %(prog)s -c config.toml\n"
+            "  %(prog)s --config /etc/cleanup-syncoid/config.toml"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "-c",
+        "--config",
+        dest="config",
         metavar="CONFIG",
         required=False,
         help=(
@@ -521,11 +551,11 @@ def main():
     cli_args, unknown_args = parser.parse_known_args()
     if unknown_args:
         parser.error(f"unrecognized arguments: {' '.join(unknown_args)}")
-    if not cli_args.c:
-        parser.error("the following arguments are required: -c")
+    if not cli_args.config:
+        parser.error("the following arguments are required: -c/--config")
 
     try:
-        args = load_config(cli_args.c, default_script_name)
+        args = load_config(cli_args.config, default_script_name)
     except (OSError, ValueError, RuntimeError) as exc:
         # Configuration can contain credentials, so report only the error message and
         # never dump the parsed document or raw TOML contents.
@@ -561,7 +591,7 @@ def main():
 
 
 def run_cleanup(args, state):
-    """Run the original cleanup lifecycle; expose final diagnostics for MQTT."""
+    """Run cleanup; missing datasets are reported after all configured datasets are tried."""
     prefix = args.log_prefix
     retain_count = max(int(args.retain_count or 0), 0)
     older_than = args.older_than  # Optional[datetime.timedelta]
@@ -609,6 +639,7 @@ def run_cleanup(args, state):
 
     dry_run = args.dry_run = (args.command == 'dry-run')
     success = False
+    missing_failure = None
 
     try:
         # Read input files inside the try block, so bad paths also trigger error mail.
@@ -617,28 +648,49 @@ def run_cleanup(args, state):
 
         syncoid_hosts = read_hostnames(args.syncoid_hosts_file)
 
-        if args.command == 'dry-run':
-            for dataset in datasets:
-                delete_syncoid_snapshots(logger, error_logger, dataset, syncoid_hosts, older_than, retain_count, dry_run)
-                print_separator(logger)
-            print_separator(logger)
-
-            print_separator(logger)
-            logger.info("Snapshot dry-run completed.")
-
-        elif args.command == 'delete':
+        if args.command == 'delete':
             print_separator(logger)
             logger.info("Starting snapshot deletion...")
             print_separator(logger)
 
-            for dataset in datasets:
-                delete_syncoid_snapshots(logger, error_logger, dataset, syncoid_hosts, older_than, retain_count, dry_run)
-                print_separator(logger)
+        missing_datasets = []
+        missing_stderr = []
 
+        for dataset in datasets:
+            try:
+                delete_syncoid_snapshots(
+                    logger,
+                    error_logger,
+                    dataset,
+                    syncoid_hosts,
+                    older_than,
+                    retain_count,
+                    dry_run,
+                )
+            except CommandError as exc:
+                if not is_missing_dataset_error(exc):
+                    raise
+                missing_datasets.append(dataset)
+                if exc.stderr:
+                    missing_stderr.append(exc.stderr)
+                error_logger.error(
+                    f"[{dataset}] Configured ZFS dataset does not exist; "
+                    "continuing with the next dataset."
+                )
             print_separator(logger)
+
+        print_separator(logger)
+        if args.command == 'dry-run':
+            logger.info("Snapshot dry-run completed.")
+        else:
             logger.info("Snapshot deletion completed.")
-        
-        success = True
+
+        if missing_datasets:
+            missing_failure = MissingDatasetsError(missing_datasets, missing_stderr)
+            state["error"] = missing_failure
+            error_logger.error(str(missing_failure))
+        else:
+            success = True
 
     except Exception as e:
         error_logger.error(f"Fatal error: {e}")
@@ -647,6 +699,12 @@ def run_cleanup(args, state):
     finally:
         try:
             if args.send_mail and not success:
+                intro = "Cleanup failed. See attached logs."
+                if missing_failure is not None:
+                    intro = (
+                        f"Cleanup completed with a failure because {missing_failure} "
+                        "See attached logs for the original ZFS diagnostics."
+                    )
                 MailTo(
                     logger,
                     error_logger,
@@ -654,7 +712,7 @@ def run_cleanup(args, state):
                     log_folder=log_folder,
                     prefix=prefix,
                     subject="Syncoid cleanup FAILED - logs attached",
-                    intro="Cleanup failed. See attached logs.",
+                    intro=intro,
                     backup_title=backup_title,
                     backup_comment=backup_comment,
                 )
@@ -681,6 +739,9 @@ def run_cleanup(args, state):
         # Clean up empty .err file
         if os.path.exists(err_filepath) and os.path.getsize(err_filepath) == 0:
             os.remove(err_filepath)
+
+    if missing_failure is not None:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
