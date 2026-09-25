@@ -11,50 +11,76 @@ The application version is `__version__` in CleanUpInSyncoidSnapshots.py.
 The supplied archive had no version identifier or version history. It is the
 unversioned baseline; 0.0.1 is the first numbered release, with no invented prior releases.
 
-## 0.0.5 — 2026-09-23
+## 0.0.6 — 2026-09-25
 
-### Failure notification reliability
+### Missing-dataset continuation with failed overall result
 
-- Fix the runtime failure-notification lifecycle so enabled email and MQTT are attempted
-  independently for fatal errors after a valid TOML configuration has loaded.
-- Preserve the normal log-attached failure email for cleanup/ZFS errors, including the
-  reported `zfs list ... dataset does not exist` failure pattern.
-- Add a fallback failure email path for runtime errors that occur before normal logger/mail
-  finalization is available. The fallback deliberately sends no attachments rather than
-  silently skipping email.
-- Keep fatal exceptions/nonzero service results intact: notifications are attempted first,
-  then the original exception still propagates.
-- Preserve the existing log-retention ordering, but add late-failure handling so a
-  retention/finalization exception still triggers an enabled failure-email attempt and
-  an MQTT failure report.
-- Make MQTT delivery outcome observable: `notify_mqtt` now returns a success boolean and
-  writes `MQTT report sent successfully` to the main log after a successful isolated publish.
-  Failure/timeout behavior remains nonfatal and continues to avoid echoing credentials.
-- Treat `mqtt.publish_dry_run = false` as suppression of clean successful previews only.
-  Fatal dry-run failures are now still published when MQTT is enabled, so preview mode cannot
-  hide an error report.
+- Detect the explicit ZFS `dataset does not exist` stderr returned by the per-dataset
+  `zfs list -H -t snapshot -o name DATASET` command.
+- Record that dataset as missing and continue processing every later configured dataset
+  instead of aborting the whole run immediately.
+- Keep the overall result failed when any configured dataset is missing: final process exit
+  remains code 1, failure mail is sent when mail is enabled, and MQTT keeps the existing
+  `status = "failure"` / `exit_code = 1` contract used by Home Assistant automation logic.
+- Reuse the existing MQTT JSON schema. No fields or status values were changed. The existing
+  `error` field now clearly states which ZFS dataset(s) were missing, while the existing
+  `stderr` field carries the original bounded ZFS `dataset does not exist` diagnostic.
+- Make the failure-mail intro explicitly identify a missing-dataset partial failure and state
+  that later configured datasets were still processed. The `.err` attachment still contains
+  the original command failure plus the specific continuation/final-failure log entries.
+- Keep all other checked ZFS failures immediately fatal, including permission/pool/I/O/list
+  failures not matching the explicit missing-dataset diagnostic and all `zfs destroy` failures.
+- Do not prune old log groups after a missing-dataset run because the run is not successful.
+- Add lifecycle regression coverage for a missing first dataset followed by two valid datasets,
+  verifying all three are attempted and the final mail/MQTT/exit outcome is still failure.
+- Update README.md, commented_code_map.md, config-example.toml, and VERIFICATION.md for the
+  current behavior.
 
-### Tests and documentation
+### Preserved behavior
 
-- Add regression coverage proving a fatal ZFS command error attempts both enabled failure
-  email and MQTT and includes command stderr in the MQTT report.
-- Add regression coverage for early runtime failures before logger setup and for late
-  finalization failures that still must attempt failure mail and MQTT.
-- Add coverage for the positive MQTT-delivery log/return value and for failed dry-runs that
-  must publish even when clean preview reports are disabled.
-- Update README.md, `config-example.toml`, commented_code_map.md, VERIFICATION.md, and
-  package metadata for 0.0.5.
-
-### Preserved safety behavior
-
-Snapshot selection, exact hostname matching, one-snapshot-at-a-time `zfs destroy`, dry-run
-protection, TOML validation, retention rules, non-retained MQTT publishing, and the single
-public `-c CONFIG` CLI remain intact.
+Snapshot matching, retention calculation, one-at-a-time snapshot destruction, dry-run deletion
+protection, root enforcement, TOML configuration, mail opt-in, MQTT transport/schema/status names,
+Home Assistant blueprint contract, and non-missing-error handling remain unchanged.
 
 ### Verification
 
-See VERIFICATION.md for compile/tests, CLI checks, notification regression coverage, and
-release-package verification.
+See VERIFICATION.md for automated tests, compile/CLI checks, package-manifest comparison, and
+remaining live-ZFS/mail/MQTT/Home Assistant limitations.
+
+## 0.0.5 — 2026-09-25
+
+### CLI help and documentation maintenance
+
+- Restore standard argparse `-h` / `--help` so users can inspect the supported CLI
+  without supplying a configuration file or starting cleanup.
+- Add `--config CONFIG` as a long-form alias for the existing `-c CONFIG` selector.
+  Both forms load the same TOML configuration and enter the same validated cleanup lifecycle.
+- Keep all operational settings in TOML; legacy options such as `--command` remain rejected.
+- Add help examples for the short and long configuration selector.
+- Add regression tests confirming help exits successfully without calling cleanup, the long
+  alias reaches the same TOML loader/lifecycle, and old operational flags are still rejected.
+- Update README.md so every public flag is described with purpose and usage examples.
+- Update `config-example.toml` with both supported configuration-selector spellings and the
+  non-destructive help command.
+- Refresh `.gitignore` for the current TOML-only project: preserve the shipped example while
+  ignoring local `config*.toml`, Python bytecode/cache, virtualenv, build, distribution, and
+  generated log directories. Remove stale JSON/MQTT-config ignore entries from older layouts.
+- Update commented_code_map.md and VERIFICATION.md for the current implementation and checks.
+- Correct the old verification manifest count: the supplied 0.0.4 archive contains 17 project
+  files (including `.gitignore`), and 0.0.5 preserves the same 17 relative file paths.
+- Keep the supplied `DISCLAIMER.md` in the package and link to it from the README safety notes.
+
+### Preserved behavior
+
+Snapshot matching, dry-run/delete selection, root enforcement, retention rules, log location,
+mail behavior, MQTT schema/delivery behavior, TOML validation, and ZFS command construction are
+unchanged. The CLI change only improves discovery and adds an equivalent long spelling for the
+existing configuration selector.
+
+### Verification
+
+See VERIFICATION.md for automated tests, compile/CLI checks, manifest comparison, archive
+integrity checks, and the items that were not exercised against live ZFS/mail/Home Assistant.
 
 ## 0.0.4 — 2026-09-16
 
