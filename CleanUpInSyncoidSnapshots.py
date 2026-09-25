@@ -12,7 +12,7 @@ from config_loader import load_config, parse_older_than
 from mqtt_notifications import build_mqtt_report, notify_mqtt
 
 
-__version__ = "0.0.5"
+__version__ = "0.0.6"
 
 
 class ReportWarningHandler(logging.Handler):
@@ -107,6 +107,28 @@ class CommandError(RuntimeError):
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
+
+
+class MissingDatasetsError(RuntimeError):
+    """Final non-success result after one or more configured ZFS datasets were absent.
+
+    Missing datasets are collected so later configured datasets can still be processed.
+    The final exception deliberately carries ``stderr`` because the existing MQTT report
+    builder already exposes that field without changing the JSON success/failure contract.
+    """
+
+    def __init__(self, datasets: List[str], stderr_messages: List[str]):
+        self.datasets = list(datasets)
+        self.stderr = "\n".join(message for message in stderr_messages if message).strip()
+        names = ", ".join(self.datasets)
+        super().__init__(
+            f"Missing ZFS dataset(s): {names}. Other configured datasets were still processed."
+        )
+
+
+def is_missing_dataset_error(error: CommandError) -> bool:
+    """Return True only for ZFS's explicit 'dataset does not exist' diagnostic."""
+    return "dataset does not exist" in (error.stderr or "").lower()
 
 
 def run_cmd(
@@ -291,62 +313,6 @@ def MailTo(
 
     mail_exit_code, stderr_output = send_mail(subject, body, recipient, attachment_files)
     WasMailSent(logger, error_logger, mail_exit_code, stderr_output)
-
-
-def send_failure_mail_if_needed(args, failure, state) -> None:
-    """Ensure a runtime failure gets one failure-mail attempt when mail is enabled.
-
-    Normal cleanup failures already send their log-attached failure mail inside
-    ``run_cleanup`` and mark that attempt in shared state. This helper covers failures
-    outside that block, including log finalization and very early runtime setup.
-    When loggers exist it reuses ``MailTo`` so attachments are preserved; otherwise
-    it falls back to a minimal no-attachment message.
-    """
-    if not args.send_mail or state.get("failure_mail_attempted"):
-        return
-
-    state["failure_mail_attempted"] = True
-    logger = state.get("logger")
-    error_logger = state.get("error_logger")
-    log_folder = state.get("log_folder")
-    prefix = state.get("prefix")
-
-    if logger and error_logger and log_folder and prefix:
-        try:
-            MailTo(
-                logger,
-                error_logger,
-                recipient=args.send_mail,
-                log_folder=log_folder,
-                prefix=prefix,
-                subject="Syncoid cleanup FAILED - logs attached",
-                intro=f"Cleanup failed. Error: {failure}",
-                backup_title=args.backup_title,
-                backup_comment=args.backup_comment,
-            )
-        except Exception as mail_e:
-            error_logger.error(f"Failed to send late failure notification mail: {mail_e}")
-        return
-
-    body = build_backup_mail_header(args.backup_title, args.backup_comment)
-    body += "Cleanup failed before the normal log-attached failure report could be prepared.\n\n"
-    body += f"Error: {failure}\n"
-
-    try:
-        mail_exit_code, stderr_output = send_mail(
-            "Syncoid cleanup FAILED - early runtime error",
-            body,
-            args.send_mail,
-            attachment_files=None,
-        )
-        if mail_exit_code == 0:
-            print("Failure mail was sent successfully (without log attachments).", file=sys.stderr)
-        else:
-            print("There was an error sending the fallback failure mail.", file=sys.stderr)
-            if stderr_output:
-                print(stderr_output, file=sys.stderr)
-    except Exception as mail_e:
-        print(f"Failed to send fallback failure mail: {mail_e}", file=sys.stderr)
 
 
 
@@ -558,15 +524,23 @@ def delete_old_files(
 def main():
     default_script_name = script_base_name()
 
-    # The application intentionally exposes only one runtime option: -c CONFIG.
-    # All cleanup, retention, mail, report, logging, and MQTT behavior lives in TOML.
+    # The application intentionally exposes one operational setting on the CLI:
+    # which TOML file to load. Standard -h/--help is available for discoverability;
+    # all cleanup, retention, mail, report, logging, and MQTT behavior lives in TOML.
     parser = argparse.ArgumentParser(
         description="Delete matching syncoid ZFS snapshots using one TOML configuration file.",
         usage="%(prog)s -c CONFIG",
-        add_help=False,
+        epilog=(
+            "Examples:\n"
+            "  %(prog)s -c config.toml\n"
+            "  %(prog)s --config /etc/cleanup-syncoid/config.toml"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "-c",
+        "--config",
+        dest="config",
         metavar="CONFIG",
         required=False,
         help=(
@@ -577,11 +551,11 @@ def main():
     cli_args, unknown_args = parser.parse_known_args()
     if unknown_args:
         parser.error(f"unrecognized arguments: {' '.join(unknown_args)}")
-    if not cli_args.c:
-        parser.error("the following arguments are required: -c")
+    if not cli_args.config:
+        parser.error("the following arguments are required: -c/--config")
 
     try:
-        args = load_config(cli_args.c, default_script_name)
+        args = load_config(cli_args.config, default_script_name)
     except (OSError, ValueError, RuntimeError) as exc:
         # Configuration can contain credentials, so report only the error message and
         # never dump the parsed document or raw TOML contents.
@@ -606,27 +580,10 @@ def main():
         failure = exc
         raise
     finally:
-        # A runtime failure can happen before run_cleanup reaches its normal
-        # log-attached failure-mail block. In that case, still attempt the enabled
-        # email channel before MQTT. Each channel is independent: a mail problem
-        # must never suppress the MQTT attempt, and vice versa.
-        if exit_code != 0 and args.send_mail:
-            send_failure_mail_if_needed(args, failure, state)
-
-        # MQTT is the final status report and is attempted for every completed
-        # runtime lifecycle when enabled, including fatal exceptions.
+        # Report only after existing mail and log cleanup have finished.
         if mqtt_config is not None:
-            logger = state.get("logger")
-            if logger:
-                log_blank_line(logger)
-                logger.info("Preparing MQTT report...")
             report = build_mqtt_report(args, __version__, exit_code, failure, state.get("warning", False))
-            notify_mqtt(
-                mqtt_config,
-                report,
-                state.get("error_logger"),
-                logger,
-            )
+            notify_mqtt(mqtt_config, report, state.get("error_logger"))
         warning_handler = state.get("warning_handler")
         if warning_handler:
             state["error_logger"].removeHandler(warning_handler)
@@ -634,7 +591,7 @@ def main():
 
 
 def run_cleanup(args, state):
-    """Run the original cleanup lifecycle; expose final diagnostics for MQTT."""
+    """Run cleanup; missing datasets are reported after all configured datasets are tried."""
     prefix = args.log_prefix
     retain_count = max(int(args.retain_count or 0), 0)
     older_than = args.older_than  # Optional[datetime.timedelta]
@@ -648,13 +605,7 @@ def run_cleanup(args, state):
     log_folder = get_script_log_folder()
 
     logger, error_logger, err_filepath = setup_logger(log_folder, log_date, prefix)
-    state.update(
-        logger=logger,
-        error_logger=error_logger,
-        err_filepath=err_filepath,
-        log_folder=log_folder,
-        prefix=prefix,
-    )
+    state.update(error_logger=error_logger, err_filepath=err_filepath)
     if args.mqtt_config:
         warning_handler = ReportWarningHandler(state)
         error_logger.addHandler(warning_handler)
@@ -670,7 +621,6 @@ def run_cleanup(args, state):
 
         try:
             if args.send_mail:
-                state["failure_mail_attempted"] = True
                 MailTo(
                     logger,
                     error_logger,
@@ -689,6 +639,7 @@ def run_cleanup(args, state):
 
     dry_run = args.dry_run = (args.command == 'dry-run')
     success = False
+    missing_failure = None
 
     try:
         # Read input files inside the try block, so bad paths also trigger error mail.
@@ -697,38 +648,63 @@ def run_cleanup(args, state):
 
         syncoid_hosts = read_hostnames(args.syncoid_hosts_file)
 
-        if args.command == 'dry-run':
-            for dataset in datasets:
-                delete_syncoid_snapshots(logger, error_logger, dataset, syncoid_hosts, older_than, retain_count, dry_run)
-                print_separator(logger)
-            print_separator(logger)
-
-            print_separator(logger)
-            logger.info("Snapshot dry-run completed.")
-
-        elif args.command == 'delete':
+        if args.command == 'delete':
             print_separator(logger)
             logger.info("Starting snapshot deletion...")
             print_separator(logger)
 
-            for dataset in datasets:
-                delete_syncoid_snapshots(logger, error_logger, dataset, syncoid_hosts, older_than, retain_count, dry_run)
-                print_separator(logger)
+        missing_datasets = []
+        missing_stderr = []
 
+        for dataset in datasets:
+            try:
+                delete_syncoid_snapshots(
+                    logger,
+                    error_logger,
+                    dataset,
+                    syncoid_hosts,
+                    older_than,
+                    retain_count,
+                    dry_run,
+                )
+            except CommandError as exc:
+                if not is_missing_dataset_error(exc):
+                    raise
+                missing_datasets.append(dataset)
+                if exc.stderr:
+                    missing_stderr.append(exc.stderr)
+                error_logger.error(
+                    f"[{dataset}] Configured ZFS dataset does not exist; "
+                    "continuing with the next dataset."
+                )
             print_separator(logger)
+
+        print_separator(logger)
+        if args.command == 'dry-run':
+            logger.info("Snapshot dry-run completed.")
+        else:
             logger.info("Snapshot deletion completed.")
-        
-        success = True
+
+        if missing_datasets:
+            missing_failure = MissingDatasetsError(missing_datasets, missing_stderr)
+            state["error"] = missing_failure
+            error_logger.error(str(missing_failure))
+        else:
+            success = True
 
     except Exception as e:
-        success = False
         error_logger.error(f"Fatal error: {e}")
         raise
 
     finally:
         try:
             if args.send_mail and not success:
-                state["failure_mail_attempted"] = True
+                intro = "Cleanup failed. See attached logs."
+                if missing_failure is not None:
+                    intro = (
+                        f"Cleanup completed with a failure because {missing_failure} "
+                        "See attached logs for the original ZFS diagnostics."
+                    )
                 MailTo(
                     logger,
                     error_logger,
@@ -736,7 +712,7 @@ def run_cleanup(args, state):
                     log_folder=log_folder,
                     prefix=prefix,
                     subject="Syncoid cleanup FAILED - logs attached",
-                    intro="Cleanup failed. See attached logs.",
+                    intro=intro,
                     backup_title=backup_title,
                     backup_comment=backup_comment,
                 )
@@ -763,6 +739,9 @@ def run_cleanup(args, state):
         # Clean up empty .err file
         if os.path.exists(err_filepath) and os.path.getsize(err_filepath) == 0:
             os.remove(err_filepath)
+
+    if missing_failure is not None:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

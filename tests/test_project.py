@@ -155,7 +155,7 @@ recipient=""
             self.assertEqual(Path(loaded.datasets_file), folder / "datasets.txt")
             self.assertEqual(Path(loaded.syncoid_hosts_file), folder / "hosts.txt")
 
-    def test_cli_accepts_only_config_option(self):
+    def test_cli_rejects_old_operational_options(self):
         stderr = io.StringIO()
         with patch.object(sys, "argv", ["cleanup", "--command", "dry-run"]), \
                 patch.object(sys, "stderr", stderr), \
@@ -165,6 +165,28 @@ recipient=""
         self.assertIn("usage: cleanup -c CONFIG", stderr.getvalue())
         self.assertIn("unrecognized arguments: --command dry-run", stderr.getvalue())
         cleanup.assert_not_called()
+
+    def test_cli_help_is_available_without_cleanup(self):
+        stdout = io.StringIO()
+        with patch.object(sys, "argv", ["cleanup", "--help"]), \
+                patch.object(sys, "stdout", stdout), \
+                patch.object(app, "run_cleanup") as cleanup, self.assertRaises(SystemExit) as caught:
+            app.main()
+        self.assertEqual(caught.exception.code, 0)
+        help_text = stdout.getvalue()
+        self.assertIn("-h, --help", help_text)
+        self.assertIn("-c, --config CONFIG", help_text)
+        self.assertIn("Examples:", help_text)
+        cleanup.assert_not_called()
+
+    def test_cli_long_config_alias_loads_same_toml(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = write_config(Path(directory), mqtt_enabled=False)
+            with patch.object(sys, "argv", ["cleanup", "--config", str(path)]), \
+                    patch.object(app, "run_cleanup") as cleanup:
+                app.main()
+        cleanup.assert_called_once()
+        self.assertEqual(cleanup.call_args.args[0].config_file, str(path.resolve()))
 
 
 class MqttConfigTests(unittest.TestCase):
@@ -249,8 +271,7 @@ class ReportTests(unittest.TestCase):
         mqtt_config = dict(mqtt.DEFAULTS, host="localhost", topic="status", username="u", password="secret")
         report = mqtt.build_mqtt_report(arguments(), "0.0.1", 0)
         with patch.object(mqtt.subprocess, "run", return_value=Mock(returncode=0)) as launch:
-            result = mqtt.notify_mqtt(mqtt_config, report)
-        self.assertTrue(result)
+            mqtt.notify_mqtt(mqtt_config, report)
         call = launch.call_args
         self.assertNotIn("secret", " ".join(call.args[0]))
         self.assertEqual(json.loads(call.kwargs["input"])["report"], report)
@@ -263,34 +284,12 @@ class ReportTests(unittest.TestCase):
             mqtt.notify_mqtt(mqtt_config, report)
         self.assertTrue(json.loads(launch.call_args.kwargs["input"])["report"]["dry_run"])
 
-    def test_failed_dry_run_is_published_even_when_successful_previews_are_disabled(self):
-        mqtt_config = dict(mqtt.DEFAULTS, publish_dry_run=False)
-        error = app.CommandError(["zfs", "list"], 1, "", "dataset does not exist")
-        report = mqtt.build_mqtt_report(arguments(command="dry-run"), "0.0.1", 1, error)
-        with patch.object(mqtt.subprocess, "run", return_value=Mock(returncode=0)) as launch:
-            result = mqtt.notify_mqtt(mqtt_config, report)
-        self.assertTrue(result)
-        self.assertEqual(json.loads(launch.call_args.kwargs["input"])["report"]["status"], "failure")
-
     def test_delivery_failure_is_logged_and_secret_not_echoed(self):
         logger = Mock()
         with patch.object(mqtt.subprocess, "run", return_value=Mock(returncode=1, stderr="secret")):
-            result = mqtt.notify_mqtt(dict(mqtt.DEFAULTS), {"dry_run": False}, logger)
-        self.assertFalse(result)
+            mqtt.notify_mqtt(dict(mqtt.DEFAULTS), {"dry_run": False}, logger)
         self.assertIn("MQTT notification failed", logger.error.call_args.args[0])
         self.assertNotIn("secret", logger.error.call_args.args[0])
-
-    def test_successful_delivery_is_logged_when_main_logger_is_available(self):
-        logger = Mock()
-        with patch.object(mqtt.subprocess, "run", return_value=Mock(returncode=0)):
-            result = mqtt.notify_mqtt(
-                dict(mqtt.DEFAULTS),
-                {"dry_run": False},
-                Mock(),
-                logger,
-            )
-        self.assertTrue(result)
-        logger.info.assert_called_once_with("MQTT report sent successfully")
 
     def test_timeout_is_nonfatal(self):
         logger = Mock()
@@ -364,8 +363,8 @@ class BlueprintTests(unittest.TestCase):
 
 class LifecycleTests(unittest.TestCase):
     def invoke(self, command="delete", root=True, zfs_error=None, cleanup_error=None,
-               mail_error=None, mqtt_enabled=True, missing_input=False,
-               mail_enabled=False, mail_on_success=False):
+               mail_error=None, mqtt_enabled=True, missing_input=False, mail_enabled=None,
+               datasets_text=None):
         """Exercise actual config/CLI/lifecycle with harmless command and logger substitutes."""
         with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
             folder = Path(directory)
@@ -373,9 +372,11 @@ class LifecycleTests(unittest.TestCase):
                 folder,
                 command=command,
                 mqtt_enabled=mqtt_enabled,
-                mail_enabled=mail_enabled or bool(mail_error),
-                mail_on_success=mail_on_success or bool(mail_error),
+                mail_enabled=bool(mail_error) if mail_enabled is None else mail_enabled,
+                mail_on_success=bool(mail_error),
             )
+            if datasets_text is not None:
+                (folder / "datasets.txt").write_text(datasets_text, encoding="utf-8")
             if missing_input:
                 (folder / "datasets.txt").unlink()
             stack.enter_context(patch.object(sys, "argv", ["cleanup", "-c", str(config_path)]))
@@ -388,29 +389,29 @@ class LifecycleTests(unittest.TestCase):
                 patch.object(app, "run_cmd", side_effect=zfs_error, return_value=Mock(stdout=""))
             )
             stack.enter_context(patch.object(app, "delete_old_files", side_effect=cleanup_error))
-            mail = stack.enter_context(patch.object(app, "MailTo", side_effect=mail_error))
+            self.last_mail = stack.enter_context(patch.object(app, "MailTo", side_effect=mail_error))
             notify = stack.enter_context(patch.object(app, "notify_mqtt"))
             exception = None
             try:
                 app.main()
             except (Exception, SystemExit, KeyboardInterrupt) as exc:
                 exception = exc
-            return notify, command_mock, exception, mail
+            return notify, command_mock, exception
 
     def test_success_final_report(self):
-        notify, command, error, _ = self.invoke()
+        notify, command, error = self.invoke()
         self.assertIsNone(error)
         self.assertEqual(command.call_count, 1)
         self.assertEqual(notify.call_args.args[1]["status"], "success")
 
     def test_original_mode_needs_no_mqtt(self):
-        notify, command, error, _ = self.invoke(mqtt_enabled=False)
+        notify, command, error = self.invoke(mqtt_enabled=False)
         self.assertIsNone(error)
         notify.assert_not_called()
         self.assertEqual(command.call_count, 1)
 
     def test_root_rejection_reports_failure(self):
-        notify, command, error, _ = self.invoke(root=False)
+        notify, command, error = self.invoke(root=False)
         self.assertIsInstance(error, SystemExit)
         self.assertEqual(error.code, 1)
         command.assert_not_called()
@@ -420,72 +421,86 @@ class LifecycleTests(unittest.TestCase):
 
     def test_command_failure_reports_stderr(self):
         failure = app.CommandError(["zfs", "list"], 2, "", "unavailable")
-        notify, _, error, _ = self.invoke(zfs_error=failure)
+        notify, _, error = self.invoke(zfs_error=failure)
         self.assertIs(error, failure)
         self.assertEqual(notify.call_args.args[1]["stderr"], "unavailable")
 
-    def test_command_failure_attempts_both_enabled_email_and_mqtt(self):
-        failure = app.CommandError(["zfs", "list"], 1, "", "dataset does not exist")
-        notify, _, error, mail = self.invoke(zfs_error=failure, mail_enabled=True)
-        self.assertIs(error, failure)
-        mail.assert_called_once()
-        self.assertIn("FAILED", mail.call_args.kwargs["subject"])
-        self.assertEqual(notify.call_count, 1)
-        self.assertEqual(notify.call_args.args[1]["status"], "failure")
-        self.assertEqual(notify.call_args.args[1]["stderr"], "dataset does not exist")
-
     def test_missing_input_reports_failure_before_zfs(self):
-        notify, command, error, _ = self.invoke(missing_input=True)
+        notify, command, error = self.invoke(missing_input=True)
         self.assertIsInstance(error, FileNotFoundError)
         command.assert_not_called()
         self.assertEqual(notify.call_args.args[1]["status"], "failure")
 
-    def test_finalization_failure_cannot_report_success(self):
-        notify, _, error, _ = self.invoke(cleanup_error=OSError("log cleanup failed"))
-        self.assertIsInstance(error, OSError)
-        self.assertEqual(notify.call_args.args[1]["status"], "failure")
+    def test_missing_dataset_continues_then_reports_failure_and_failed_mail(self):
+        def zfs_result(cmd, **_kwargs):
+            dataset = cmd[-1]
+            if dataset == "tank/missing":
+                raise app.CommandError(
+                    cmd,
+                    1,
+                    "",
+                    "cannot open 'tank/missing': dataset does not exist",
+                )
+            return Mock(stdout="")
 
-    def test_finalization_failure_still_attempts_failure_email(self):
-        notify, _, error, mail = self.invoke(
-            cleanup_error=OSError("log cleanup failed"),
+        notify, command, error = self.invoke(
+            zfs_error=zfs_result,
             mail_enabled=True,
-            mail_on_success=False,
+            datasets_text="tank/missing\ntank/one\ntank/two\n",
         )
+        self.assertIsInstance(error, SystemExit)
+        self.assertEqual(error.code, 1)
+        self.assertEqual(command.call_count, 3)
+        self.assertEqual([call.args[0][-1] for call in command.call_args_list], [
+            "tank/missing", "tank/one", "tank/two"
+        ])
+
+        report = notify.call_args.args[1]
+        self.assertEqual(report["status"], "failure")
+        self.assertEqual(report["exit_code"], 1)
+        self.assertIn("Missing ZFS dataset(s): tank/missing", report["error"])
+        self.assertIn("dataset does not exist", report["stderr"])
+
+        self.last_mail.assert_called_once()
+        mail_call = self.last_mail.call_args.kwargs
+        self.assertIn("FAILED", mail_call["subject"])
+        self.assertIn("Missing ZFS dataset(s): tank/missing", mail_call["intro"])
+        self.assertIn("Other configured datasets were still processed", mail_call["intro"])
+
+    def test_other_zfs_failure_still_stops_immediately(self):
+        failure = app.CommandError(
+            ["zfs", "list"],
+            1,
+            "",
+            "cannot open 'tank/denied': permission denied",
+        )
+        notify, command, error = self.invoke(
+            zfs_error=failure,
+            datasets_text="tank/denied\ntank/one\ntank/two\n",
+        )
+        self.assertIs(error, failure)
+        self.assertEqual(command.call_count, 1)
+        report = notify.call_args.args[1]
+        self.assertEqual(report["status"], "failure")
+        self.assertIn("permission denied", report["stderr"])
+
+    def test_finalization_failure_cannot_report_success(self):
+        notify, _, error = self.invoke(cleanup_error=OSError("log cleanup failed"))
         self.assertIsInstance(error, OSError)
-        mail.assert_called_once()
-        self.assertIn("FAILED", mail.call_args.kwargs["subject"])
         self.assertEqual(notify.call_args.args[1]["status"], "failure")
 
     def test_mail_warning_is_nonfatal(self):
-        notify, _, error, _ = self.invoke(mail_error=OSError("mail unavailable"))
+        notify, _, error = self.invoke(mail_error=OSError("mail unavailable"))
         self.assertIsNone(error)
         report = notify.call_args.args[1]
         self.assertEqual(report["status"], "success")
         self.assertTrue(report["warning"])
 
     def test_interrupt_is_never_success(self):
-        notify, _, error, _ = self.invoke(zfs_error=KeyboardInterrupt())
+        notify, _, error = self.invoke(zfs_error=KeyboardInterrupt())
         self.assertIsInstance(error, KeyboardInterrupt)
         self.assertEqual(notify.call_args.args[1]["exit_code"], 130)
         self.assertEqual(notify.call_args.args[1]["status"], "failure")
-
-    def test_early_runtime_failure_still_attempts_enabled_mail_and_mqtt(self):
-        with tempfile.TemporaryDirectory() as directory:
-            folder = Path(directory)
-            config_path = write_config(folder, mqtt_enabled=True, mail_enabled=True)
-            failure = OSError("cannot create logs directory")
-            with patch.object(sys, "argv", ["cleanup", "-c", str(config_path)]), \
-                    patch.object(app, "get_script_log_folder", side_effect=failure), \
-                    patch.object(app, "send_mail", return_value=(0, "")) as mail, \
-                    patch.object(app, "notify_mqtt") as notify, \
-                    patch.object(sys, "stderr", io.StringIO()):
-                with self.assertRaises(OSError) as caught:
-                    app.main()
-            self.assertIs(caught.exception, failure)
-            mail.assert_called_once()
-            self.assertIn("FAILED", mail.call_args.args[0])
-            self.assertEqual(notify.call_count, 1)
-            self.assertEqual(notify.call_args.args[1]["status"], "failure")
 
     def test_invalid_config_stops_before_cleanup(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -1,58 +1,73 @@
-# Verification — CleanUpInSyncoidSnapshots 0.0.5
+# Verification — CleanUpInSyncoidSnapshots 0.0.6
 
-Verified on 2026-09-23 in the release workspace using Python 3.13.5.
+Verified on 2026-09-25 in the release workspace using Python 3.13.5.
 The application targets Linux/ZFS. Destructive ZFS operations were not run.
 
 ## Automated results
 
-- **46 tests run: 43 passed and 3 skipped.**
+- **45 tests run: 42 passed and 3 skipped.**
 - The three skipped tests are the optional real-Paho loopback MQTT integration tests
   because `paho-mqtt` is not installed in this verification environment.
-- The reported fatal-command pattern is covered with a mocked `CommandError` equivalent
-  to a failing `zfs list`: when mail and MQTT are enabled, one failure email and one
-  failure MQTT report are both attempted, and command stderr is included in MQTT diagnostics.
-- Early runtime failure before log setup is covered: enabled mail falls back to a minimal
-  no-attachment failure message and MQTT is still attempted independently.
-- Late log-retention/finalization failure is covered: the final MQTT status is failure and
-  enabled failure mail is still attempted.
-- Failed dry-runs are covered: `publish_dry_run = false` suppresses only routine successful
-  previews; a failed dry-run still publishes when MQTT is enabled.
-- Successful MQTT worker completion is covered and logs `MQTT report sent successfully`.
-- TOML schema/default/path tests passed, including every supported setting in
-  `config-example.toml`.
-- Snapshot/log retention tests passed with ZFS commands mocked.
-- Home Assistant blueprint structural tests passed.
+- The new missing-dataset lifecycle test uses the real ZFS diagnostic form
+  `cannot open 'tank/missing': dataset does not exist` and confirms a missing first dataset
+  does not prevent the next two configured datasets from being processed.
+- That same test confirms the final process result remains exit code 1, the existing MQTT
+  report remains `status: failure`, and the existing `error` and `stderr` fields identify
+  the missing dataset and retain the original ZFS diagnostic.
+- The missing-dataset test also confirms enabled mail follows the existing failed-mail path,
+  uses a `FAILED` subject, and receives a specific missing-dataset explanation.
+- A separate safety regression confirms an unrelated ZFS failure such as `permission denied`
+  still aborts immediately before later datasets are attempted.
+- Existing TOML schema/default/path, retention, root guard, mail-warning, interrupt,
+  logging-location, MQTT report/worker, and Home Assistant blueprint tests continue to pass.
 
 ## Compile and CLI checks
 
 - `CleanUpInSyncoidSnapshots.py`, `config_loader.py`, `mqtt_notifications.py`, and
-  `tests/test_project.py` compiled successfully in memory without generating bytecode.
-- Importing the application reports `__version__ == "0.0.5"`.
-- Running the main script with no options exits 2 and shows required usage
-  `CleanUpInSyncoidSnapshots.py -c CONFIG`.
-- Supplying an old operational option such as `--command dry-run` exits 2 with an
-  `unrecognized arguments` error; cleanup is not entered.
-- The public main application parser still exposes only `-c CONFIG`.
+  `tests/test_project.py` compiled successfully in memory without generating release bytecode.
+- Importing the application reports `__version__ == "0.0.6"`.
+- `CleanUpInSyncoidSnapshots.py --help` exits successfully and documents:
+  - `-h, --help`
+  - `-c, --config CONFIG`
+- Running the main script with no options exits 2 and reports that `-c/--config` is required.
+- Supplying an old operational option such as `--command dry-run` still exits 2 as unrecognized.
+- Every top-level function/class in `CleanUpInSyncoidSnapshots.py`, including the new
+  missing-dataset helpers, is represented in `commented_code_map.md`.
 
-## Failure-notification checks
+## Missing-dataset behavior checked
 
-- Normal cleanup/ZFS exceptions keep the existing log-attached failure email path.
-- `state["failure_mail_attempted"]` prevents duplicate failure-mail attempts for the same
-  normal failure while allowing `main()` to cover errors outside the normal mail block.
-- If logger state exists for a late runtime error, `send_failure_mail_if_needed()` reuses
-  `MailTo()` so log attachments remain available.
-- If logger setup never completed, the fallback uses `send_mail()` without attachments so
-  email is still attempted rather than silently skipped.
-- MQTT is attempted after the email path and remains independent of email success/failure.
-- `notify_mqtt()` returns `True` only when its isolated publisher exits successfully and
-  returns `False` for disabled/suppressed/failed delivery without changing cleanup status.
-- Fatal exceptions are still re-raised after notification attempts, preserving nonzero
-  service/process behavior.
+The new special case is deliberately narrow:
 
-## 0.0.4-to-0.0.5 manifest comparison
+1. `delete_syncoid_snapshots` still runs the same checked, nonrecursive per-dataset
+   `zfs list -H -t snapshot -o name DATASET` command.
+2. `run_cmd` still raises the existing `CommandError` on nonzero return codes and logs the
+   original stderr to the `.err` logger.
+3. `run_cleanup` recognizes only stderr containing the explicit `dataset does not exist`
+   diagnostic, records that configured dataset, and continues with later configured datasets.
+4. After all remaining datasets have been attempted, the run is still marked failed. It sends
+   failed mail when enabled, skips successful-run log pruning, and exits 1.
+5. `main` therefore uses the existing failure-report path. The MQTT JSON schema and status
+   names are not changed: `status` remains `failure`, `exit_code` remains 1, and the already
+   existing `error`/`stderr` fields carry the specific reason and original diagnostic.
+6. Any other checked list failure and every checked `zfs destroy` failure retain the original
+   immediate-fatal behavior.
 
-The supplied 0.0.4 archive contains **17 files**. The 0.0.5 release also contains
-**17 files**. No project file was added or removed.
+## Unchanged integration contract
+
+The following files are SHA-256 byte-for-byte unchanged from the supplied 0.0.5 archive:
+
+- `mqtt_notifications.py`
+- `home-assistant/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml`
+- `config_loader.py`
+- `DISCLAIMER.md`
+
+This verifies that the MQTT report schema/transport implementation, Home Assistant blueprint
+consumer logic, TOML loader, and supplied disclaimer were not modified for this release.
+
+## 0.0.5-to-0.0.6 manifest comparison
+
+The supplied 0.0.5 archive contains **17 project files**. The 0.0.6 release contains the same
+**17 relative project file paths**. No project file was added or removed.
 
 Changed intentionally:
 
@@ -62,10 +77,9 @@ Changed intentionally:
 - `VERSIONING.md`
 - `commented_code_map.md`
 - `config-example.toml`
-- `mqtt_notifications.py`
 - `tests/test_project.py`
 
-Preserved byte-for-byte from the supplied 0.0.4 archive:
+Preserved byte-for-byte from 0.0.5:
 
 - `.github/CODEOWNERS`
 - `.gitignore`
@@ -74,26 +88,33 @@ Preserved byte-for-byte from the supplied 0.0.4 archive:
 - `datasets-example`
 - `home-assistant/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml`
 - `hostnames-example`
+- `mqtt_notifications.py`
 - `requirements-mqtt.txt`
 - `requirements.txt`
 
 ## Packaging checks
 
-The final archive is checked for ZIP CRC integrity and byte-for-byte equality against
-its release source tree after extraction. It must contain no `__pycache__`, `.pyc`,
-`.pyo`, virtual environment, generated `logs/`, build/cache directories, local credential
-files, or temporary verification files. A SHA-256 sidecar is generated for the ZIP.
+The final archive is checked for:
+
+- exact project-file manifest equality with the supplied 0.0.5 archive;
+- exact project-file manifest equality with the final release source tree;
+- ZIP CRC integrity;
+- byte-for-byte equality after extracting the final ZIP;
+- absence of `__pycache__`, `.pyc`, `.pyo`, virtual environments, generated `logs/`,
+  build/cache directories, local credential/config files, and temporary verification files;
+- a SHA-256 sidecar generated for the final ZIP.
 
 ## What was not fully tested
 
-- No real `zfs destroy` or production ZFS dataset operation was executed; destructive ZFS
-  behavior is covered with mocks and its snapshot-selection/destruction construction remains
-  unchanged.
-- No real mail server or host `mail` delivery was exercised.
-- `paho-mqtt` is not installed here, so the three real loopback QoS/rejection/timeout
-  integration tests were skipped. Worker/auth/TLS/timeout behavior remains covered by mocks.
+- No real ZFS pool was modified and no real `zfs destroy` was executed. ZFS behavior is tested
+  with mocked command results, including the exact missing-dataset stderr supplied for this issue.
+- No real host `mail`/`mailx` delivery was performed; failed-mail selection, subject, and intro
+  are covered by lifecycle mocks.
+- `paho-mqtt` is not installed here, so the three real loopback QoS/rejection/timeout integration
+  tests were skipped. The MQTT implementation itself is unchanged from 0.0.5, and report/worker
+  behavior remains covered by mocks.
 - No production MQTT broker or credentials were used.
-- Home Assistant itself was not installed, so the packaged blueprint was structurally tested
-  rather than executed in a live instance.
-- Python 3.10 is not installed in this workspace, so the `tomli` fallback could not be
-  executed directly here; Python 3.13 uses standard `tomllib`.
+- Home Assistant itself was not installed; its blueprint is byte-for-byte unchanged from 0.0.5
+  and continues to be structurally tested against the existing success/failure contract.
+- Python 3.10 is not installed in this workspace, so the `tomli` fallback was not executed here;
+  Python 3.13 uses standard `tomllib`.
