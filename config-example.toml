@@ -28,6 +28,16 @@ older_than = "7d"
 # log timestamp groups to protect. Negative values are normalized to 0.
 retain_count = 10
 
+# true = when ZFS explicitly reports a configured dataset as nonexistent, record the
+# failure and continue with the next configured dataset. false = stop immediately.
+# Either way, the final result is failure and enabled mail/MQTT reports that failure.
+continue_on_missing_dataset = true
+
+# true = for any other checked ZFS list/destroy command failure on one dataset,
+# record the failure and continue with the next configured dataset. false = stop
+# immediately. This does not make global/config/root/input failures recoverable.
+continue_on_other_failures = true
+
 [logging]
 # Prefix used for generated .log and .err filenames. Empty uses the script basename.
 # All log files are always stored in a `logs/` directory beside the actual script.
@@ -94,6 +104,6 @@ certfile = ""
 # Optional private key matching certfile. Encrypted-key passwords are not supported.
 keyfile = ""
 
-# By default dry-run reports are not published. Set true only if previews should
-# also send MQTT JSON status reports.
+# By default successful dry-run preview reports are not published. Failure reports
+# are always published when MQTT is enabled. Set true to also publish successful previews.
 publish_dry_run = false

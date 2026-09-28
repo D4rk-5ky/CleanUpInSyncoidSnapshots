@@ -1,19 +1,19 @@
-# Original project notices
+# CleanUpInSyncoidSnapshots Disclaimer
 
-## ⚠️ Disclaimer / Liability Notice
+## ⚠️ Disclaimer / Liability
 
-This script is provided **“as is”**, without warranty of any kind.
-By using this script, you agree that **I am not liable** for any data loss, system damage, service interruption, or other issues that may occur as a result of running it.
+**Use this script at your own risk.**
 
-This script performs **destructive operations**, including but not limited to:
+The author takes **no responsibility or liability** for any data loss, service disruption, misconfiguration, service outage, missed backups, credential exposure, or other damage that may occur from using this script.
 
-- Destroying ZFS snapshots (`zfs destroy`)
-- Deleting log files (`*.log` / `*.err`)
-- Executing system-level commands (`zfs`, `mail`)
+Before running it in production, you **must**:
 
-⚠️ **Always test on a non-production system first.**  
-⚠️ **Always ensure you have verified backups.**  
-⚠️ **You are fully responsible for reviewing and understanding the code before running it.**
+- Read the entire source code
+- Understand exactly what it does (and what it does *not* do)
+- Review and adapt it to your own environment
+- Test it carefully in a non‑production setup
+
+By using this script, **you accept full responsibility** for its effects.
 
 ⚠️ AI-assisted / vibe-coded experimental software. Use at your own risk.
 
@@ -23,10 +23,11 @@ This project is AI-assisted / vibe-coded software created as a hobby project. It
 
 You are responsible for reviewing the code, testing it in a safe environment, making backups, and understanding what it does before using it on real data. The author is not responsible for damage, data loss, broken systems, security issues, or other problems caused by using this software.
 
+---
+
 ## Data Loss Warning
 
-This application can perform destructive operations, including deleting ZFS snapshots, and backup data. Always test with dry-runs first, check the generated plans, and keep a separate working backup.
-
+CleanUpInSyncoidSnapshots can perform destructive operations, including deleting ZFS snapshots and pruning its own log files. Always use `command = "dry-run"` first, review the reported candidates, and keep independent verified backups.
 
 ## License
 
