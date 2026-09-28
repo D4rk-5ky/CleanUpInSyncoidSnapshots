@@ -1,4 +1,4 @@
-# Commented code map — CleanUpInSyncoidSnapshots 0.0.6
+# Commented code map — CleanUpInSyncoidSnapshots 0.0.8
 
 This file explains the current implementation. It is not a version history; release changes belong in `VERSIONING.md`.
 
@@ -15,9 +15,9 @@ This file explains the current implementation. It is not a version history; rele
 | `script_base_name` | Produces a filesystem-safe basename from the script filename for default log naming. |
 | `CommandError` | Carries failed command, return code, stdout, and stderr so failures retain useful diagnostics for logging and MQTT reporting. |
 | `CommandError.__init__` | Stores command diagnostics and builds the human-readable failure message. |
-| `MissingDatasetsError` | Represents the final failed result when one or more configured datasets were explicitly reported missing after later datasets were still processed. Carries collected stderr so the unchanged MQTT report builder can populate its existing `stderr` field. |
-| `MissingDatasetsError.__init__` | Stores the missing dataset names, combines their original ZFS stderr diagnostics, and builds the human-readable final reason used by mail/MQTT. |
-| `is_missing_dataset_error` | Recognizes only ZFS command failures whose stderr explicitly contains `dataset does not exist`; this keeps unrelated ZFS failures on the original immediate-fatal path. |
+| `DatasetFailuresError` | Represents one or more dataset-level checked ZFS failures for final reporting. It can combine explicit missing-dataset failures and other list/destroy failures without changing the existing MQTT schema. |
+| `DatasetFailuresError.__init__` | Stores each dataset/kind/`CommandError`, combines original stderr diagnostics, separates missing from other failures in the human-readable summary, and exposes combined `stderr` for MQTT. |
+| `is_missing_dataset_error` | Recognizes only ZFS command failures whose stderr explicitly contains `dataset does not exist`; `run_cleanup` uses that classification to choose the matching continuation option. |
 | `run_cmd` | Executes ZFS commands without a shell, captures stdout/stderr, logs details, and raises `CommandError` on checked nonzero exit. Keeping argv as a list avoids shell interpolation. |
 | `get_newest_files` | Finds the newest `.log` and `.err` files for the configured prefix so email can attach/read the current report files. |
 | `read_hostnames` | Reads exact Syncoid hostnames, ignoring blank lines and whole-line `#` comments. |
@@ -28,10 +28,10 @@ This file explains the current implementation. It is not a version history; rele
 | `build_backup_mail_header` | Builds the optional title/comment block shared by success and failure email bodies. |
 | `MailTo` | Collects the newest log/error files, assembles body text, calls `send_mail`, and records delivery outcome. |
 | `parse_syncoid_ts` | Parses Syncoid's timestamp suffix including signed or signless positive GMT offsets and returns a timezone-aware datetime for safe UTC comparison. |
-| `delete_syncoid_snapshots` | Lists snapshots for one explicit dataset, matches only configured Syncoid hosts, sorts newest-first, applies retain/age protection, and previews or destroys selected snapshots one at a time. Checked command failures still propagate to `run_cleanup`, which specially collects only explicit missing-dataset list failures. |
+| `delete_syncoid_snapshots` | Lists snapshots for one explicit dataset, matches only configured Syncoid hosts, sorts newest-first, applies retain/age protection, and previews or destroys selected snapshots one at a time. Checked list/destroy failures propagate to `run_cleanup`; a failed destroy stops further work inside that dataset before any configured outer-loop continuation. |
 | `delete_old_files` | Applies the existing shared retention policy to timestamp-paired `.log`/`.err` groups. In dry-run it only reports candidates. |
-| `main` | Public entry point. Provides standard `-h/--help`, accepts the equivalent `-c CONFIG` / `--config CONFIG` selector, rejects old operational flags, loads/validates TOML before cleanup, runs the existing lifecycle, preserves exit/exception behavior, and sends one optional final MQTT report after finalization. |
-| `run_cleanup` | Cleanup lifecycle reused by the TOML interface: logger setup, root guard, input-file loading, dry-run/delete processing, optional mail, log retention, and empty `.err` cleanup. It now collects explicit missing-dataset `zfs list` failures, continues later datasets, sends a failed mail when enabled, and exits 1 after processing; unrelated ZFS failures remain immediately fatal. |
+| `main` | Public entry point. Provides standard `-h/--help` and `--version`, accepts the equivalent `-c CONFIG` / `--config CONFIG` selector, rejects old operational flags, loads/validates TOML before cleanup, runs the existing lifecycle, preserves exit/exception behavior, and sends one optional final MQTT report after finalization. The help/version actions exit before config loading or destructive work. |
+| `run_cleanup` | Cleanup lifecycle reused by the TOML interface: logger setup, root guard, input-file loading, dry-run/delete processing, optional mail, log retention, and empty `.err` cleanup. It records dataset-level checked ZFS failures, classifies missing vs other, applies the two continuation booleans, aggregates continued failures, preserves failure mail/MQTT/exit behavior, and prunes old logs only after success. |
 | Imported `parse_older_than` | Re-exported from `config_loader.py` so existing callers/tests can still use `CleanUpInSyncoidSnapshots.parse_older_than` while parsing logic lives with configuration validation. |
 
 ## `config_loader.py`
@@ -39,14 +39,14 @@ This file explains the current implementation. It is not a version history; rele
 | Function/constant | What it does and why |
 | --- | --- |
 | `TOP_LEVEL_SECTIONS` | Exact accepted TOML sections. Unknown sections are rejected to catch misspelled configuration before destructive work. |
-| `SECTION_KEYS` | Exact accepted keys in each section. This is also used by tests to ensure `config-example.toml` documents every supported setting. |
+| `SECTION_KEYS` | Exact accepted keys in each section, including both cleanup continuation booleans. Tests use it to ensure `config-example.toml` documents every supported setting. |
 | `parse_older_than` | Converts `Nd`, `Nw`, or `Nm` into `timedelta`, preserving the original 30-day-month rule. Empty/optional handling is done by `load_config`. |
 | `_table` | Reads one TOML table, verifies its type, enforces required sections, and rejects unknown keys. |
 | `_required_string` | Validates nonempty string settings such as command and required file paths without coercing wrong TOML types. |
 | `_optional_string` | Validates optional string settings such as report text and log prefix while allowing empty values. |
 | `_boolean` | Requires real TOML booleans rather than accepting integer lookalikes. |
 | `_resolve_config_relative` | Expands `~` and resolves relative paths against the TOML file directory so service/cron current working directory does not change which input/certificate file is used. |
-| `load_config` | Opens TOML with `tomllib`/`tomli`, validates all application sections, converts age and defaults, maps mail/MQTT opt-ins, validates enabled MQTT settings, and returns an `argparse.Namespace` matching the fields expected by the existing cleanup/report functions. All of this occurs before ZFS work. |
+| `load_config` | Opens TOML with `tomllib`/`tomli`, validates all application sections, converts age/defaults, defaults both continuation switches to `true`, maps mail/MQTT opt-ins, validates enabled MQTT settings, and returns the runtime namespace before any ZFS work. |
 | `tomllib` / `tomli` import fallback | Python 3.11+ uses the standard library; Python 3.10 falls back to the dependency in `requirements.txt` to preserve the project's prior Python 3.10 minimum. |
 
 ## `mqtt_notifications.py`
@@ -56,7 +56,7 @@ This file explains the current implementation. It is not a version history; rele
 | `DEFAULTS` | MQTT defaults for port, credentials, client ID, QoS, timeout, TLS paths, and dry-run publishing. |
 | `validate_mqtt_config` | Validates the enabled `[mqtt]` TOML settings, rejects unknown/wrong types and wildcard publish topics, normalizes empty optional strings to absent values, enforces username/password and certificate/key relationships, and resolves certificate files relative to the TOML directory. |
 | `build_mqtt_report` | Produces the stable Home Assistant-facing JSON schema using cleanup result, report metadata, warning state, command, version, and bounded command diagnostics. |
-| `notify_mqtt` | Skips disabled/dry-run-suppressed reports, then starts a separate Python worker with config/report on stdin and a hard timeout. Publisher failure is logged but cannot change the cleanup exit result. |
+| `notify_mqtt` | Skips MQTT when disabled and suppresses only successful dry-run previews when `publish_dry_run=false`; failure reports still publish. It then starts a separate Python worker with config/report on stdin and a hard timeout. Publisher failure is logged but cannot change the cleanup exit result. |
 | `publish_worker` | Internal Paho one-shot MQTT 3.1.1 publisher. Builds auth/TLS context, publishes with configured QoS, and always uses `retain=False`. |
 | `if __name__ == "__main__"` worker gate | Accepts only the internal `--publish` argument. This is not a public application option; normal users run `CleanUpInSyncoidSnapshots.py -c CONFIG`. Unexpected worker arguments exit immediately. |
 
@@ -77,12 +77,15 @@ This file explains the current implementation. It is not a version history; rele
 | --- | --- |
 | `test_example_contains_every_supported_setting` | Ensures `config-example.toml` has every supported section/key and no undocumented extras. |
 | `test_example_loads_and_is_safe_by_default` | Confirms the packaged example parses, defaults to dry-run, leaves mail/MQTT disabled, and resolves paths correctly. |
-| `test_defaults_and_negative_retain_compatibility` | Confirms optional defaults and preservation of negative-retain normalization to zero. |
+| `test_defaults_and_negative_retain_compatibility` | Confirms optional defaults, both continuation defaults are `true` when omitted, and negative-retain normalization remains zero. |
 | `test_invalid_cleanup_and_unknown_keys_are_rejected` | Confirms invalid commands/types, misspelled keys, and unknown sections fail before cleanup. |
+| `test_continuation_options_require_real_booleans` | Confirms both continuation settings accept only real TOML booleans and reject integer lookalikes. |
 | `test_mail_requires_recipient_only_when_enabled` | Confirms explicit mail enablement cannot proceed without a recipient. |
 | `test_relative_paths_are_config_relative` | Confirms dataset/hostname paths follow the TOML file rather than current working directory. |
 | `test_cli_rejects_old_operational_options` | Confirms an old operational CLI option is rejected and cleanup is not called. |
-| `test_cli_help_is_available_without_cleanup` | Confirms standard `-h/--help` is available, documents both configuration spellings, shows examples, exits 0, and never enters cleanup. |
+| `test_cli_help_is_available_without_cleanup` | Confirms standard `-h/--help` is available, documents `--version` plus both configuration spellings, shows examples, exits 0, and never enters cleanup. |
+| `test_cli_version_is_available_without_cleanup` | Confirms `--version` prints the current application version, exits 0, and never enters cleanup or configuration loading. |
+| `test_gitignore_keeps_toml_example_trackable` | Guards the release rule that the real shipped `config-example.toml` remains explicitly unignored even though local `config*` files are ignored. |
 | `test_cli_long_config_alias_loads_same_toml` | Confirms `--config CONFIG` loads the same TOML path and reaches the same cleanup lifecycle as `-c CONFIG`. |
 
 ### `MqttConfigTests`
@@ -103,9 +106,10 @@ This file explains the current implementation. It is not a version history; rele
 | `test_success_schema_and_types` | Protects MQTT success status/type contract and JSON serializability. |
 | `test_failure_command_diagnostics` | Confirms command failures include useful bounded stderr. |
 | `test_fallback_title_and_output_limit` | Confirms blank title fallback and 4096-character diagnostic bound. |
-| `test_disabled_and_default_dry_run_do_not_launch_worker` | Confirms disabled MQTT and default dry-run suppression do no publish work. |
+| `test_disabled_and_successful_default_dry_run_do_not_launch_worker` | Confirms disabled MQTT and successful dry-run reports with default suppression do not launch the publisher. |
 | `test_worker_input_and_timeout` | Confirms secrets are not placed on the worker command line and timeout is applied. |
-| `test_dry_run_requires_explicit_publish_opt_in` | Confirms dry-run publishing requires `publish_dry_run=true`. |
+| `test_failed_dry_run_publishes_even_when_success_previews_are_disabled` | Confirms MQTT failures are published even in dry-run when successful preview publishing is disabled. |
+| `test_dry_run_requires_explicit_publish_opt_in` | Confirms successful dry-run publishing requires `publish_dry_run=true`. |
 | `test_delivery_failure_is_logged_and_secret_not_echoed` | Confirms publisher failures are nonfatal and worker stderr is not copied into logs where credentials could leak. |
 | `test_timeout_is_nonfatal` | Confirms a stuck publisher is bounded and only logged. |
 | `test_worker_tls_and_auth` | Verifies Paho receives the configured TLS context and username/password. |
@@ -127,14 +131,30 @@ This file explains the current implementation. It is not a version history; rele
 | `test_success_final_report` | Confirms a successful delete lifecycle emits MQTT success. |
 | `test_original_mode_needs_no_mqtt` | Confirms disabled MQTT performs no MQTT call and cleanup still runs. |
 | `test_root_rejection_reports_failure` | Confirms root guard stops before ZFS and is reported as failure when MQTT is enabled. |
-| `test_command_failure_reports_stderr` | Confirms a ZFS command failure remains the raised error and reaches MQTT diagnostics. |
+| `test_command_failure_reports_stderr` | Confirms a dataset-level checked ZFS failure is summarized as final failure and its original stderr reaches MQTT diagnostics. |
 | `test_missing_input_reports_failure_before_zfs` | Confirms missing dataset files fail before any ZFS command. |
-| `test_missing_dataset_continues_then_reports_failure_and_failed_mail` | Simulates the real `dataset does not exist` stderr, confirms later datasets are still listed, then verifies exit 1, unchanged MQTT `failure` status, specific `error`/`stderr`, and the normal failed-mail path with a missing-dataset reason. |
-| `test_other_zfs_failure_still_stops_immediately` | Confirms an unrelated ZFS error such as permission denied still aborts before later datasets, protecting the original fatal-error safety behavior. |
+| `test_missing_dataset_continues_then_reports_failure_and_failed_mail` | Confirms the default missing-dataset continuation attempts later datasets but still exits 1 and reports failure through MQTT and enabled mail. |
+| `test_missing_dataset_continues_then_reports_failure_and_failed_mail.zfs_result` | Nested stub that raises the exact missing-dataset diagnostic for one dataset and succeeds for later datasets. |
+| `test_missing_dataset_stops_when_continuation_is_disabled` | Confirms `continue_on_missing_dataset=false` records the failure, stops before later datasets, and still reports final failure. |
+| `test_missing_dataset_stops_when_continuation_is_disabled.zfs_result` | Nested stub for the stop-immediately missing-dataset path. |
+| `test_other_zfs_failure_continues_by_default_then_reports_failure` | Confirms a non-missing checked ZFS failure continues by default to later datasets and still produces failure mail/MQTT/exit. |
+| `test_other_zfs_failure_continues_by_default_then_reports_failure.zfs_result` | Nested permission-denied stub for default other-failure continuation. |
+| `test_destroy_failure_continues_to_next_dataset_by_default` | Confirms `continue_on_other_failures=true` also covers a checked `zfs destroy` failure and resumes at the next configured dataset. |
+| `test_destroy_failure_continues_to_next_dataset_by_default.zfs_result` | Nested list/destroy stub that exposes two matching snapshots, fails the destroy, then allows the following dataset to be listed. |
+| `test_other_zfs_failure_stops_when_continuation_is_disabled` | Confirms `continue_on_other_failures=false` stops before later datasets while preserving failure diagnostics. |
+| `test_other_zfs_failure_stops_when_continuation_is_disabled.zfs_result` | Nested permission-denied stub for the stop-immediately other-failure path. |
+| `test_mixed_continued_failures_are_combined_in_final_report` | Confirms missing and other failures can both be continued and are combined in the final MQTT error/stderr report. |
+| `test_mixed_continued_failures_are_combined_in_final_report.zfs_result` | Nested stub that emits one missing error, one permission error, and one successful dataset. |
 | `test_finalization_failure_cannot_report_success` | Confirms log-finalization failure cannot be mislabeled successful. |
 | `test_mail_warning_is_nonfatal` | Confirms mail failure leaves cleanup successful but sets MQTT warning. |
 | `test_interrupt_is_never_success` | Confirms keyboard interrupt reports exit 130/failure. |
 | `test_invalid_config_stops_before_cleanup` | Confirms enabled MQTT with incomplete settings is rejected during config parsing, before `run_cleanup`. |
+
+### `LoggingLocationTests`
+
+| Test | Purpose |
+| --- | --- |
+| `test_logs_are_created_beside_actual_script_without_tmp_fallback` | Confirms logs are always created in `logs/` beside the actual application script and that there is no silent `/tmp` fallback. |
 
 ### `RetentionTests`
 
@@ -162,10 +182,11 @@ This file explains the current implementation. It is not a version history; rele
 | --- | --- |
 | `sudo python3 CleanUpInSyncoidSnapshots.py -c config.toml` | Public cleanup invocation using the short configuration selector. `-c` chooses the TOML file; every cleanup/retention/reporting setting comes from it. |
 | `sudo python3 CleanUpInSyncoidSnapshots.py --config config.toml` | Equivalent public cleanup invocation using the long configuration selector. |
-| `python3 CleanUpInSyncoidSnapshots.py -h` / `--help` | Displays the standard CLI help and examples, then exits before configuration loading, root checks, logging, or ZFS work. |
+| `python3 CleanUpInSyncoidSnapshots.py -h` / `--help` | Displays the standard CLI help, every public flag, and examples, then exits before configuration loading, root checks, logging, or ZFS work. |
+| `python3 CleanUpInSyncoidSnapshots.py --version` | Prints `CleanUpInSyncoidSnapshots.py 0.0.8` and exits before configuration loading, logging, root checks, or ZFS work. |
 | `sudo .venv/bin/python CleanUpInSyncoidSnapshots.py -c config.toml` | Same cleanup invocation when using the documented virtual environment. |
-| `zfs list -H -t snapshot -o name DATASET` | Lists snapshot names for one explicit dataset in machine-readable form; no recursive dataset traversal is requested. Its explicit `dataset does not exist` diagnostic is collected so later configured datasets can still run; other failures remain fatal. |
-| `zfs destroy SNAPSHOT` | Deletes exactly one selected snapshot. No `-r`, force, wildcard, or shell expansion is used. |
+| `zfs list -H -t snapshot -o name DATASET` | Lists snapshot names for one explicit dataset in machine-readable form; no recursive traversal is requested. Checked failures are recorded and the matching cleanup continuation setting decides whether the outer loop advances to the next dataset. |
+| `zfs destroy SNAPSHOT` | Deletes exactly one selected snapshot. No `-r`, force, wildcard, or shell expansion is used. A checked failure is classified as an “other” dataset failure; it stops work inside that dataset and the outer loop then follows `continue_on_other_failures`. |
 | `mail -s SUBJECT [--attach FILE ...] RECIPIENT` | Optional external mail delivery using the current log/error files. |
 | `python -B mqtt_notifications.py --publish` | Internal timeout-isolated MQTT worker launched only by `notify_mqtt`; credentials/report arrive on stdin. `--publish` is not a public application flag. |
 | `python3 -m venv .venv` | Creates an isolated Python environment when desired. |
@@ -203,6 +224,6 @@ This file explains the current implementation. It is not a version history; rele
 - Dry-run never calls `zfs destroy` and never removes old log groups.
 - Snapshot matching remains limited to exact configured hostnames and the existing Syncoid timestamp pattern.
 - `zfs destroy` remains one snapshot at a time with checked failure handling.
-- Only the explicit `dataset does not exist` list error is recoverable per dataset; it still makes the final exit/mail/MQTT result a failure, while unrelated ZFS errors keep the original fatal behavior.
+- Dataset-level checked ZFS failures always make the final result fail. The two explicit continuation settings only control whether the next configured dataset is attempted; setting either to `false` restores stop-immediately behavior for that category.
 - Mail and MQTT remain optional notification layers; neither can make snapshot-selection logic broader.
 - MQTT publishing stays in a separate timeout-bounded worker and remains non-retained.
