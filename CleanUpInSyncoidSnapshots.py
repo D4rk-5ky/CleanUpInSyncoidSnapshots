@@ -12,7 +12,7 @@ from config_loader import load_config, parse_older_than
 from mqtt_notifications import build_mqtt_report, notify_mqtt
 
 
-__version__ = "0.0.6"
+__version__ = "0.0.8"
 
 
 class ReportWarningHandler(logging.Handler):
@@ -109,20 +109,39 @@ class CommandError(RuntimeError):
         self.stderr = stderr
 
 
-class MissingDatasetsError(RuntimeError):
-    """Final non-success result after one or more configured ZFS datasets were absent.
+class DatasetFailuresError(RuntimeError):
+    """Summarize one or more dataset-level ZFS command failures for final reporting.
 
-    Missing datasets are collected so later configured datasets can still be processed.
-    The final exception deliberately carries ``stderr`` because the existing MQTT report
-    builder already exposes that field without changing the JSON success/failure contract.
+    The cleanup loop records checked ``CommandError`` failures per configured dataset.
+    When the matching continuation option is enabled, later datasets are still tried;
+    regardless of continuation, this exception keeps the overall run failed and carries
+    combined stderr so the existing MQTT report can expose the original ZFS diagnostics.
     """
 
-    def __init__(self, datasets: List[str], stderr_messages: List[str]):
-        self.datasets = list(datasets)
-        self.stderr = "\n".join(message for message in stderr_messages if message).strip()
-        names = ", ".join(self.datasets)
+    def __init__(self, failures):
+        self.failures = list(failures)
+        stderr_messages = []
+        missing = []
+        other = []
+
+        for dataset, kind, error in self.failures:
+            if error.stderr:
+                stderr_messages.append(f"[{dataset}] {error.stderr}")
+            if kind == "missing":
+                missing.append(dataset)
+            else:
+                other.append(f"{dataset} (rc={error.returncode})")
+
+        self.stderr = "\n".join(stderr_messages).strip()
+        parts = []
+        if missing:
+            parts.append(f"Missing ZFS dataset(s): {', '.join(missing)}")
+        if other:
+            parts.append(f"Other ZFS failure(s): {', '.join(other)}")
+        detail = "; ".join(parts) if parts else "Dataset-level ZFS failure"
         super().__init__(
-            f"Missing ZFS dataset(s): {names}. Other configured datasets were still processed."
+            f"{detail}. The overall cleanup result is failure; later configured datasets "
+            "were processed only where the matching continuation option was enabled."
         )
 
 
@@ -529,7 +548,7 @@ def main():
     # all cleanup, retention, mail, report, logging, and MQTT behavior lives in TOML.
     parser = argparse.ArgumentParser(
         description="Delete matching syncoid ZFS snapshots using one TOML configuration file.",
-        usage="%(prog)s -c CONFIG",
+        usage="%(prog)s -c CONFIG\n       %(prog)s --help\n       %(prog)s --version",
         epilog=(
             "Examples:\n"
             "  %(prog)s -c config.toml\n"
@@ -538,14 +557,20 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="Show the application version and exit without loading configuration or running cleanup.",
+    )
+    parser.add_argument(
         "-c",
         "--config",
         dest="config",
         metavar="CONFIG",
         required=False,
         help=(
-            "Path to the TOML configuration file. All cleanup, retention, logging, "
-            "mail, report, and MQTT settings are read from this file."
+            "Path to the TOML configuration file. All cleanup, retention, continuation, "
+            "logging, mail, report, and MQTT settings are read from this file."
         ),
     )
     cli_args, unknown_args = parser.parse_known_args()
@@ -591,7 +616,7 @@ def main():
 
 
 def run_cleanup(args, state):
-    """Run cleanup; missing datasets are reported after all configured datasets are tried."""
+    """Run cleanup and apply configured per-dataset continuation rules for ZFS failures."""
     prefix = args.log_prefix
     retain_count = max(int(args.retain_count or 0), 0)
     older_than = args.older_than  # Optional[datetime.timedelta]
@@ -639,7 +664,8 @@ def run_cleanup(args, state):
 
     dry_run = args.dry_run = (args.command == 'dry-run')
     success = False
-    missing_failure = None
+    dataset_failure = None
+    dataset_failures = []
 
     try:
         # Read input files inside the try block, so bad paths also trigger error mail.
@@ -653,9 +679,6 @@ def run_cleanup(args, state):
             logger.info("Starting snapshot deletion...")
             print_separator(logger)
 
-        missing_datasets = []
-        missing_stderr = []
-
         for dataset in datasets:
             try:
                 delete_syncoid_snapshots(
@@ -668,27 +691,47 @@ def run_cleanup(args, state):
                     dry_run,
                 )
             except CommandError as exc:
-                if not is_missing_dataset_error(exc):
-                    raise
-                missing_datasets.append(dataset)
-                if exc.stderr:
-                    missing_stderr.append(exc.stderr)
-                error_logger.error(
-                    f"[{dataset}] Configured ZFS dataset does not exist; "
-                    "continuing with the next dataset."
+                missing = is_missing_dataset_error(exc)
+                kind = "missing" if missing else "other"
+                dataset_failures.append((dataset, kind, exc))
+                dataset_failure = DatasetFailuresError(dataset_failures)
+                state["error"] = dataset_failure
+
+                continue_enabled = (
+                    args.continue_on_missing_dataset
+                    if missing
+                    else args.continue_on_other_failures
                 )
+                if continue_enabled:
+                    label = "Configured ZFS dataset does not exist" if missing else "ZFS command failed"
+                    error_logger.error(
+                        f"[{dataset}] {label}; continuation is enabled, continuing with the next dataset."
+                    )
+                else:
+                    option = (
+                        "cleanup.continue_on_missing_dataset"
+                        if missing
+                        else "cleanup.continue_on_other_failures"
+                    )
+                    error_logger.error(
+                        f"[{dataset}] Continuation is disabled by {option}=false; stopping cleanup."
+                    )
+                    raise dataset_failure from exc
             print_separator(logger)
 
         print_separator(logger)
-        if args.command == 'dry-run':
+        if dataset_failures:
+            mode = "dry-run" if args.command == "dry-run" else "deletion"
+            logger.info(f"Snapshot {mode} processing completed with dataset failures.")
+        elif args.command == 'dry-run':
             logger.info("Snapshot dry-run completed.")
         else:
             logger.info("Snapshot deletion completed.")
 
-        if missing_datasets:
-            missing_failure = MissingDatasetsError(missing_datasets, missing_stderr)
-            state["error"] = missing_failure
-            error_logger.error(str(missing_failure))
+        if dataset_failures:
+            dataset_failure = DatasetFailuresError(dataset_failures)
+            state["error"] = dataset_failure
+            error_logger.error(str(dataset_failure))
         else:
             success = True
 
@@ -700,9 +743,9 @@ def run_cleanup(args, state):
         try:
             if args.send_mail and not success:
                 intro = "Cleanup failed. See attached logs."
-                if missing_failure is not None:
+                if dataset_failure is not None:
                     intro = (
-                        f"Cleanup completed with a failure because {missing_failure} "
+                        f"Cleanup completed or stopped with a failure because {dataset_failure} "
                         "See attached logs for the original ZFS diagnostics."
                     )
                 MailTo(
@@ -740,7 +783,7 @@ def run_cleanup(args, state):
         if os.path.exists(err_filepath) and os.path.getsize(err_filepath) == 0:
             os.remove(err_filepath)
 
-    if missing_failure is not None:
+    if dataset_failure is not None:
         sys.exit(1)
 
 

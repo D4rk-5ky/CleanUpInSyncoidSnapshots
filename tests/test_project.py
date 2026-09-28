@@ -36,7 +36,9 @@ def arguments(**overrides):
 
 
 def write_config(directory: Path, *, command="delete", mqtt_enabled=False,
-                 mail_enabled=False, mail_on_success=False, extra="") -> Path:
+                 mail_enabled=False, mail_on_success=False,
+                 continue_on_missing_dataset=True, continue_on_other_failures=True,
+                 extra="") -> Path:
     """Create a complete harmless TOML config plus referenced input files for lifecycle tests."""
     datasets = directory / "datasets.txt"
     hosts = directory / "hosts.txt"
@@ -49,6 +51,8 @@ datasets_file = "datasets.txt"
 syncoid_hosts_file = "hosts.txt"
 older_than = ""
 retain_count = 1
+continue_on_missing_dataset = {str(continue_on_missing_dataset).lower()}
+continue_on_other_failures = {str(continue_on_other_failures).lower()}
 
 [logging]
 prefix = "cleanup"
@@ -114,6 +118,8 @@ retain_count = -5
             loaded = config.load_config(path, "fallback")
         self.assertIsNone(loaded.older_than)
         self.assertEqual(loaded.retain_count, 0)
+        self.assertTrue(loaded.continue_on_missing_dataset)
+        self.assertTrue(loaded.continue_on_other_failures)
         self.assertEqual(loaded.log_prefix, "fallback")
         self.assertIsNone(loaded.send_mail)
         self.assertIsNone(loaded.mqtt_config)
@@ -130,6 +136,16 @@ retain_count = -5
                 path = Path(directory) / "bad.toml"
                 path.write_text(text, encoding="utf-8")
                 with self.assertRaises(ValueError):
+                    config.load_config(path, "fallback")
+
+    def test_continuation_options_require_real_booleans(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            for key in ("continue_on_missing_dataset", "continue_on_other_failures"):
+                path = write_config(folder)
+                text = path.read_text(encoding="utf-8").replace(f"{key} = true", f"{key} = 1")
+                path.write_text(text, encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, rf"cleanup\.{key} must be true or false"):
                     config.load_config(path, "fallback")
 
     def test_mail_requires_recipient_only_when_enabled(self):
@@ -175,9 +191,24 @@ recipient=""
         self.assertEqual(caught.exception.code, 0)
         help_text = stdout.getvalue()
         self.assertIn("-h, --help", help_text)
+        self.assertIn("--version", help_text)
         self.assertIn("-c, --config CONFIG", help_text)
         self.assertIn("Examples:", help_text)
         cleanup.assert_not_called()
+
+    def test_cli_version_is_available_without_cleanup(self):
+        stdout = io.StringIO()
+        with patch.object(sys, "argv", ["cleanup", "--version"]), \
+                patch.object(sys, "stdout", stdout), \
+                patch.object(app, "run_cleanup") as cleanup, self.assertRaises(SystemExit) as caught:
+            app.main()
+        self.assertEqual(caught.exception.code, 0)
+        self.assertEqual(stdout.getvalue().strip(), f"cleanup {app.__version__}")
+        cleanup.assert_not_called()
+
+    def test_gitignore_keeps_toml_example_trackable(self):
+        rules = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+        self.assertIn("!config-example.toml", rules)
 
     def test_cli_long_config_alias_loads_same_toml(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -261,11 +292,18 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(report["title"], "CleanUpInSyncoidSnapshots")
         self.assertEqual(len(report["stderr"]), 4096)
 
-    def test_disabled_and_default_dry_run_do_not_launch_worker(self):
+    def test_disabled_and_successful_default_dry_run_do_not_launch_worker(self):
         with patch.object(mqtt.subprocess, "run") as launch:
-            mqtt.notify_mqtt(None, {"dry_run": False})
-            mqtt.notify_mqtt(dict(mqtt.DEFAULTS), {"dry_run": True})
+            mqtt.notify_mqtt(None, {"dry_run": False, "status": "success"})
+            mqtt.notify_mqtt(dict(mqtt.DEFAULTS), {"dry_run": True, "status": "success"})
         launch.assert_not_called()
+
+    def test_failed_dry_run_publishes_even_when_success_previews_are_disabled(self):
+        mqtt_config = dict(mqtt.DEFAULTS, host="localhost", topic="status")
+        report = mqtt.build_mqtt_report(arguments(command="dry-run"), "0.0.8", 1, RuntimeError("failed"))
+        with patch.object(mqtt.subprocess, "run", return_value=Mock(returncode=0)) as launch:
+            mqtt.notify_mqtt(mqtt_config, report)
+        launch.assert_called_once()
 
     def test_worker_input_and_timeout(self):
         mqtt_config = dict(mqtt.DEFAULTS, host="localhost", topic="status", username="u", password="secret")
@@ -364,7 +402,8 @@ class BlueprintTests(unittest.TestCase):
 class LifecycleTests(unittest.TestCase):
     def invoke(self, command="delete", root=True, zfs_error=None, cleanup_error=None,
                mail_error=None, mqtt_enabled=True, missing_input=False, mail_enabled=None,
-               datasets_text=None):
+               datasets_text=None, continue_on_missing_dataset=True,
+               continue_on_other_failures=True):
         """Exercise actual config/CLI/lifecycle with harmless command and logger substitutes."""
         with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
             folder = Path(directory)
@@ -374,6 +413,8 @@ class LifecycleTests(unittest.TestCase):
                 mqtt_enabled=mqtt_enabled,
                 mail_enabled=bool(mail_error) if mail_enabled is None else mail_enabled,
                 mail_on_success=bool(mail_error),
+                continue_on_missing_dataset=continue_on_missing_dataset,
+                continue_on_other_failures=continue_on_other_failures,
             )
             if datasets_text is not None:
                 (folder / "datasets.txt").write_text(datasets_text, encoding="utf-8")
@@ -422,8 +463,11 @@ class LifecycleTests(unittest.TestCase):
     def test_command_failure_reports_stderr(self):
         failure = app.CommandError(["zfs", "list"], 2, "", "unavailable")
         notify, _, error = self.invoke(zfs_error=failure)
-        self.assertIs(error, failure)
-        self.assertEqual(notify.call_args.args[1]["stderr"], "unavailable")
+        self.assertIsInstance(error, SystemExit)
+        self.assertEqual(error.code, 1)
+        report = notify.call_args.args[1]
+        self.assertIn("Other ZFS failure(s): tank/data (rc=2)", report["error"])
+        self.assertIn("unavailable", report["stderr"])
 
     def test_missing_input_reports_failure_before_zfs(self):
         notify, command, error = self.invoke(missing_input=True)
@@ -465,23 +509,108 @@ class LifecycleTests(unittest.TestCase):
         mail_call = self.last_mail.call_args.kwargs
         self.assertIn("FAILED", mail_call["subject"])
         self.assertIn("Missing ZFS dataset(s): tank/missing", mail_call["intro"])
-        self.assertIn("Other configured datasets were still processed", mail_call["intro"])
+        self.assertIn("continuation option was enabled", mail_call["intro"])
 
-    def test_other_zfs_failure_still_stops_immediately(self):
-        failure = app.CommandError(
-            ["zfs", "list"],
-            1,
-            "",
-            "cannot open 'tank/denied': permission denied",
-        )
+    def test_missing_dataset_stops_when_continuation_is_disabled(self):
+        def zfs_result(cmd, **_kwargs):
+            if cmd[-1] == "tank/missing":
+                raise app.CommandError(cmd, 1, "", "cannot open 'tank/missing': dataset does not exist")
+            return Mock(stdout="")
+
         notify, command, error = self.invoke(
-            zfs_error=failure,
-            datasets_text="tank/denied\ntank/one\ntank/two\n",
+            zfs_error=zfs_result,
+            datasets_text="tank/missing\ntank/one\ntank/two\n",
+            continue_on_missing_dataset=False,
+            mail_enabled=True,
         )
-        self.assertIs(error, failure)
+        self.assertIsInstance(error, app.DatasetFailuresError)
+        self.assertEqual(command.call_count, 1)
+        self.assertIn("Missing ZFS dataset(s): tank/missing", str(error))
+        self.assertEqual(notify.call_args.args[1]["status"], "failure")
+        self.last_mail.assert_called_once()
+        self.assertIn("FAILED", self.last_mail.call_args.kwargs["subject"])
+
+    def test_other_zfs_failure_continues_by_default_then_reports_failure(self):
+        def zfs_result(cmd, **_kwargs):
+            if cmd[-1] == "tank/denied":
+                raise app.CommandError(cmd, 1, "", "cannot open 'tank/denied': permission denied")
+            return Mock(stdout="")
+
+        notify, command, error = self.invoke(
+            zfs_error=zfs_result,
+            datasets_text="tank/denied\ntank/one\ntank/two\n",
+            mail_enabled=True,
+        )
+        self.assertIsInstance(error, SystemExit)
+        self.assertEqual(error.code, 1)
+        self.assertEqual(command.call_count, 3)
+        report = notify.call_args.args[1]
+        self.assertEqual(report["status"], "failure")
+        self.assertIn("Other ZFS failure(s): tank/denied (rc=1)", report["error"])
+        self.assertIn("permission denied", report["stderr"])
+        self.last_mail.assert_called_once()
+        self.assertIn("Other ZFS failure(s): tank/denied", self.last_mail.call_args.kwargs["intro"])
+
+    def test_destroy_failure_continues_to_next_dataset_by_default(self):
+        old_snap = "tank/bad@syncoid_host_2020-01-01:00:00:00-GMT+00:00"
+        new_snap = "tank/bad@syncoid_host_2021-01-01:00:00:00-GMT+00:00"
+
+        def zfs_result(cmd, **_kwargs):
+            if cmd[:2] == ["zfs", "list"] and cmd[-1] == "tank/bad":
+                return Mock(stdout=f"{old_snap}\n{new_snap}\n")
+            if cmd[:2] == ["zfs", "destroy"]:
+                raise app.CommandError(cmd, 5, "", "cannot destroy snapshot: dataset is busy")
+            return Mock(stdout="")
+
+        notify, command, error = self.invoke(
+            zfs_error=zfs_result,
+            datasets_text="tank/bad\ntank/good\n",
+        )
+        self.assertIsInstance(error, SystemExit)
+        self.assertEqual(error.code, 1)
+        self.assertTrue(any(call.args[0][:2] == ["zfs", "destroy"] for call in command.call_args_list))
+        self.assertEqual(command.call_args_list[-1].args[0][-1], "tank/good")
+        report = notify.call_args.args[1]
+        self.assertIn("Other ZFS failure(s): tank/bad (rc=5)", report["error"])
+        self.assertIn("dataset is busy", report["stderr"])
+
+    def test_other_zfs_failure_stops_when_continuation_is_disabled(self):
+        def zfs_result(cmd, **_kwargs):
+            if cmd[-1] == "tank/denied":
+                raise app.CommandError(cmd, 1, "", "cannot open 'tank/denied': permission denied")
+            return Mock(stdout="")
+
+        notify, command, error = self.invoke(
+            zfs_error=zfs_result,
+            datasets_text="tank/denied\ntank/one\ntank/two\n",
+            continue_on_other_failures=False,
+        )
+        self.assertIsInstance(error, app.DatasetFailuresError)
         self.assertEqual(command.call_count, 1)
         report = notify.call_args.args[1]
         self.assertEqual(report["status"], "failure")
+        self.assertIn("permission denied", report["stderr"])
+
+    def test_mixed_continued_failures_are_combined_in_final_report(self):
+        def zfs_result(cmd, **_kwargs):
+            dataset = cmd[-1]
+            if dataset == "tank/missing":
+                raise app.CommandError(cmd, 1, "", "cannot open 'tank/missing': dataset does not exist")
+            if dataset == "tank/denied":
+                raise app.CommandError(cmd, 2, "", "cannot open 'tank/denied': permission denied")
+            return Mock(stdout="")
+
+        notify, command, error = self.invoke(
+            zfs_error=zfs_result,
+            datasets_text="tank/missing\ntank/denied\ntank/good\n",
+        )
+        self.assertIsInstance(error, SystemExit)
+        self.assertEqual(error.code, 1)
+        self.assertEqual(command.call_count, 3)
+        report = notify.call_args.args[1]
+        self.assertIn("Missing ZFS dataset(s): tank/missing", report["error"])
+        self.assertIn("Other ZFS failure(s): tank/denied (rc=2)", report["error"])
+        self.assertIn("dataset does not exist", report["stderr"])
         self.assertIn("permission denied", report["stderr"])
 
     def test_finalization_failure_cannot_report_success(self):

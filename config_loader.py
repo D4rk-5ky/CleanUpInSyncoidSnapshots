@@ -17,7 +17,15 @@ from mqtt_notifications import validate_mqtt_config
 
 TOP_LEVEL_SECTIONS = {"cleanup", "logging", "report", "mail", "mqtt"}
 SECTION_KEYS = {
-    "cleanup": {"command", "datasets_file", "syncoid_hosts_file", "older_than", "retain_count"},
+    "cleanup": {
+        "command",
+        "datasets_file",
+        "syncoid_hosts_file",
+        "older_than",
+        "retain_count",
+        "continue_on_missing_dataset",
+        "continue_on_other_failures",
+    },
     "logging": {"prefix"},
     "report": {"title", "comment"},
     "mail": {"enabled", "recipient", "on_success"},
@@ -160,6 +168,13 @@ def load_config(path: str, default_log_prefix: str):
     # Preserve the old CLI behavior where negative values were normalized to zero.
     retain_count = max(retain_count, 0)
 
+    continue_on_missing_dataset = _boolean(
+        cleanup, "cleanup", "continue_on_missing_dataset", True
+    )
+    continue_on_other_failures = _boolean(
+        cleanup, "cleanup", "continue_on_other_failures", True
+    )
+
     log_prefix = _optional_string(logging_cfg, "logging", "prefix", default_log_prefix)
     if not log_prefix:
         log_prefix = default_log_prefix
@@ -187,6 +202,8 @@ def load_config(path: str, default_log_prefix: str):
         syncoid_hosts_file=syncoid_hosts_file,
         older_than=older_than,
         retain_count=retain_count,
+        continue_on_missing_dataset=continue_on_missing_dataset,
+        continue_on_other_failures=continue_on_other_failures,
         log_prefix=log_prefix,
         send_mail=send_mail,
         mail_on_success=mail_on_success,

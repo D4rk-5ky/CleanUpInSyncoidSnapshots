@@ -99,7 +99,9 @@ def build_mqtt_report(args, version, exit_code, error=None, warning=False):
 
 def notify_mqtt(config, report, error_logger=None):
     """Send one final report without altering cleanup's exit status on delivery failure."""
-    if config is None or (report["dry_run"] and not config["publish_dry_run"]):
+    if config is None:
+        return
+    if report["dry_run"] and report["status"] == "success" and not config["publish_dry_run"]:
         return
     try:
         # stdin keeps credentials and report content out of the process command line.

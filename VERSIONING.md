@@ -11,6 +11,77 @@ The application version is `__version__` in CleanUpInSyncoidSnapshots.py.
 The supplied archive had no version identifier or version history. It is the
 unversioned baseline; 0.0.1 is the first numbered release, with no invented prior releases.
 
+## 0.0.8 — 2026-09-28
+
+### Configurable continuation for missing and other ZFS dataset failures
+
+- Bump the application/package version from 0.0.7 to 0.0.8.
+- Add two strict `[cleanup]` TOML booleans, both defaulting to `true` even when omitted:
+  - `continue_on_missing_dataset` controls whether the explicit ZFS `dataset does not exist`
+    failure continues with the next configured dataset.
+  - `continue_on_other_failures` controls whether other checked ZFS `list` or `destroy`
+    failures continue with the next configured dataset.
+- Keep every encountered dataset-level ZFS failure as an overall failed run. Continuation only decides
+  whether later configured datasets are attempted; it never turns a failed command into success.
+- Replace the missing-only final error container with `DatasetFailuresError`, which can aggregate both
+  missing and other checked ZFS failures and preserve their original stderr for MQTT reporting.
+- When continuation is disabled for the matching failure category, stop immediately after recording the
+  failure and report it through the same final mail/MQTT failure paths.
+- When continuation is enabled, continue at the next configured dataset. A failed `zfs destroy` still
+  stops further snapshot work inside the current dataset before the outer dataset loop continues.
+- Keep global/config/root/input/process-start failures and interrupts outside these continuation switches.
+- If mail is enabled, any dataset failure uses the existing FAILED-mail path whether it was continued or
+  stopped immediately.
+- If MQTT is enabled, failure reports are now published even during `dry-run`; `publish_dry_run=false`
+  suppresses only successful dry-run previews. The MQTT JSON schema and status names are unchanged.
+- Keep failed runs from pruning old log groups so the failure evidence remains available.
+- Update the complete config example, README current-use documentation, code map, verification evidence,
+  and regression tests for both `true` and `false` behavior.
+
+### Preserved safety behavior
+
+Snapshot matching, retention selection, exact configured hostname matching, one-snapshot-at-a-time
+`zfs destroy`, no-shell command execution, root enforcement, dry-run no-destroy behavior, mail/MQTT
+opt-in, non-retained MQTT publishing, timeout-isolated MQTT delivery, Home Assistant JSON contract,
+and deterministic log location remain unchanged except for the requested continuation/notification rules.
+
+### Verification
+
+See `VERIFICATION.md` for the full test, compile/CLI, manifest, and package checks plus live-system limits.
+
+## 0.0.7 — 2026-09-28
+
+### CLI/version, disclaimer, and release-hygiene maintenance
+
+- Bump the application/package version from 0.0.6 to 0.0.7.
+- Add a public `--version` argparse action. It prints the application name/version and exits
+  successfully before configuration loading, log creation, root checks, notifications, or ZFS work.
+- Expand the custom usage banner and `--help` output so `--version` is visible alongside the
+  existing `-h/--help` and `-c/--config CONFIG` flags. No cleanup/retention behavior moved back
+  onto the CLI; operational settings still come only from TOML.
+- Add regression tests that protect both `--version` and its presence in `--help`.
+- Correct `.gitignore` so `config-example.toml` is explicitly kept even though site-local
+  `config*` files remain ignored; add a regression test for that packaging/repository rule.
+- Replace the previous general liability text with the project owner's supplied disclaimer text,
+  retaining project-specific data-loss and no-license notes after it.
+- Update README.md for current 0.0.7 usage only, including the complete public flag table and
+  the version command. Update commented_code_map.md with the new flag and tests.
+- Keep `config-example.toml` unchanged because its schema test confirms it already contains
+  every supported setting and remains safe by default with `command = "dry-run"`.
+- Keep the 17-file project manifest unchanged: no project file was added or removed.
+
+### Preserved behavior
+
+Snapshot matching, retention calculation, dry-run protection, one-at-a-time `zfs destroy`, root
+enforcement, missing-dataset continuation/final-failure behavior, TOML validation, mail behavior,
+MQTT transport/schema, Home Assistant blueprint behavior, log location, and log retention remain
+unchanged from 0.0.6.
+
+### Verification
+
+See VERIFICATION.md for the 47-test result, compile/CLI checks, manifest/package checks, and
+remaining live-ZFS/mail/MQTT/Home Assistant limitations.
+
 ## 0.0.6 — 2026-09-25
 
 ### Missing-dataset continuation with failed overall result
