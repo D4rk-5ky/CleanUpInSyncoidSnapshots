@@ -2,7 +2,7 @@
 
 CleanUpInSyncoidSnapshots removes matching Syncoid-created ZFS snapshots, can preview the exact deletion set first, prunes its own log groups with the same retention settings, and can optionally send email and MQTT JSON status reports.
 
-Current application version: **0.0.6**.
+Current application version: **0.0.8**.
 
 ## Requirements
 
@@ -46,10 +46,12 @@ The example defaults to `command = "dry-run"`, with both mail and MQTT disabled.
 | Setting | Required/default | Meaning |
 | --- | --- | --- |
 | `command` | Required | `"dry-run"` previews candidates; `"delete"` performs snapshot destruction. |
-| `datasets_file` | Required | File containing one exact local ZFS dataset per non-empty line. A listed dataset that ZFS explicitly reports as nonexistent is recorded as a failure, but later listed datasets are still processed. |
+| `datasets_file` | Required | File containing one exact local ZFS dataset per non-empty line. Dataset-level ZFS failures always make the final run fail; the two continuation options below decide whether later configured datasets are still attempted. |
 | `syncoid_hosts_file` | Required | File containing Syncoid hostnames, one per line. Blank lines and whole-line `#` comments are ignored. |
 | `older_than` | `""` | Optional age cutoff such as `7d`, `2w`, or `3m`. `m` means 30 days. Empty disables the age cutoff. |
 | `retain_count` | `0` | Protect the newest N matching snapshots per hostname/dataset and the newest N log timestamp groups. Negative values are normalized to 0 to preserve earlier behavior. |
+| `continue_on_missing_dataset` | `true` | When ZFS explicitly reports `dataset does not exist`, record the failure and continue with the next configured dataset. `false` stops immediately. The final result is failure either way. |
+| `continue_on_other_failures` | `true` | When another checked ZFS `list` or `destroy` command fails for a dataset, record the failure and continue with the next configured dataset. `false` stops immediately. Global/config/root/input failures are not made recoverable. |
 
 ### `[logging]`
 
@@ -97,7 +99,7 @@ MQTT is optional and disabled unless `enabled = true`.
 | `ca_certs` | `""` | Optional CA file. Empty uses system trust roots when TLS is enabled. |
 | `certfile` | `""` | Optional mutual-TLS client certificate. Requires `keyfile` and `tls = true`. |
 | `keyfile` | `""` | Optional matching private key. Requires `certfile` and `tls = true`. |
-| `publish_dry_run` | `false` | When `false`, dry-run reports are not published. Set `true` to publish previews too. |
+| `publish_dry_run` | `false` | Controls successful dry-run preview reports. Failure reports are still published whenever MQTT is enabled; set `true` to also publish successful previews. |
 
 Certificate paths may be absolute or relative to the TOML file. MQTT messages are always published with `retain = false`. Credentials and report data are sent to the isolated publisher through standard input rather than command-line arguments. MQTT delivery failures are nonfatal and do not change the cleanup result.
 
@@ -110,7 +112,7 @@ tank/data
 tank/backups
 ```
 
-Blank dataset lines are ignored. Dataset comments are not supported. The script processes only the explicitly listed datasets and does not ask ZFS for recursive dataset traversal. If `zfs list` explicitly reports `dataset does not exist` for one configured dataset, that dataset is recorded as missing and the script continues with the remaining configured datasets. The overall run still finishes as a failure.
+Blank dataset lines are ignored. Dataset comments are not supported. The script processes only the explicitly listed datasets and does not ask ZFS for recursive dataset traversal. Dataset-level checked ZFS failures are always recorded as failures. With the default continuation settings, the script moves on to later configured datasets after either an explicit missing-dataset error or another checked ZFS list/destroy failure; both behaviors can be disabled independently in `[cleanup]`.
 
 Example hostname file:
 
@@ -124,15 +126,16 @@ Hostname matching is exact and case-sensitive. Blank lines and whole-line `#` co
 
 ## Running the application
 
-The application has one operational CLI setting: which TOML configuration file to load. Standard help is also available.
+The application has one operational CLI setting: which TOML configuration file to load. Standard help and version output are also available.
 
 | Flag | Required | What it does |
 | --- | --- | --- |
 | `-c CONFIG` | Yes for a cleanup run | Selects the TOML configuration file. |
 | `--config CONFIG` | Yes for a cleanup run | Long-form alias for `-c CONFIG`; it loads the same TOML file. |
-| `-h`, `--help` | No | Shows the built-in CLI help and examples, then exits without starting cleanup. |
+| `-h`, `--help` | No | Shows the built-in CLI help, all public flags, and examples, then exits without starting cleanup. |
+| `--version` | No | Prints the application name/version and exits without loading configuration, creating logs, checking root, or running ZFS commands. |
 
-The configuration selector only chooses the TOML file. Cleanup mode, input files, retention, logging, email, report metadata, and MQTT settings all come from that file.
+The configuration selector only chooses the TOML file. Cleanup mode, input files, retention, continuation behavior, logging, email, report metadata, and MQTT settings all come from that file.
 
 Run it with the short option:
 
@@ -156,6 +159,12 @@ To display help without running cleanup:
 
 ```bash
 python3 CleanUpInSyncoidSnapshots.py --help
+```
+
+To display the installed application version without running cleanup:
+
+```bash
+python3 CleanUpInSyncoidSnapshots.py --version
 ```
 
 No other public operational flags are accepted. For example, `--command dry-run` is rejected because `command = "dry-run"` belongs in the TOML file. If no configuration option is supplied, argument parsing exits before cleanup starts.
@@ -201,7 +210,7 @@ Each snapshot is destroyed individually with:
 zfs destroy SNAPSHOT
 ```
 
-No recursive or force flags are added. A checked `zfs destroy` failure, or a `zfs list` failure other than the explicit `dataset does not exist` diagnostic, remains fatal and stops subsequent processing; deletions already completed are not rolled back. A missing configured dataset is the one exception: it is recorded, later datasets are still processed, and the final run remains failed.
+No recursive or force flags are added. Any checked `zfs list` or `zfs destroy` failure makes the final run fail, and deletions already completed are not rolled back. By default, a dataset-level command failure is recorded and processing moves on to the next configured dataset. Set `continue_on_missing_dataset = false` to stop immediately on the explicit missing-dataset diagnostic, or set `continue_on_other_failures = false` to stop immediately on other checked ZFS list/destroy failures. A failed `zfs destroy` stops further snapshot processing inside that dataset before the outer loop decides whether to continue with the next dataset.
 
 ## Log retention behavior
 
@@ -213,17 +222,23 @@ Log retention uses the same `older_than` and `retain_count` settings as snapshot
 
 Actual cleanup and dry-run execution both require root. The guard runs before reading dataset/hostname files or issuing ZFS commands. If root is missing, the application logs the error, optionally mails it, optionally reports it through MQTT, and exits with code 1.
 
-## Missing configured datasets
+## Dataset failure continuation
 
-When ZFS returns the explicit diagnostic `dataset does not exist` while listing snapshots for a configured dataset, the application treats it as a recoverable-per-dataset but failed-overall condition:
+Two independent `[cleanup]` options control what happens after a checked ZFS command fails for one configured dataset:
 
-- the missing dataset is written to the `.err` log;
-- processing continues with every later dataset in `datasets_file`;
-- if mail is enabled, the final mail uses the normal **FAILED** subject and states that the failure was caused by one or more missing datasets;
-- the process exits with code `1`;
-- the MQTT JSON contract is unchanged: `status` is still `"failure"`, `exit_code` is still `1`, and the existing `error` and `stderr` fields identify the missing dataset and preserve the ZFS diagnostic.
+```toml
+continue_on_missing_dataset = true
+continue_on_other_failures = true
+```
 
-This special handling applies only to the explicit missing-dataset diagnostic. Permission errors, pool/I/O errors, unexpected ZFS failures, and snapshot-destroy failures remain immediately fatal as before.
+- `continue_on_missing_dataset` applies only when ZFS explicitly reports `dataset does not exist` while listing the configured dataset.
+- `continue_on_other_failures` applies to other checked ZFS `list` or `destroy` failures, such as permission, pool/I/O, busy-snapshot, or similar nonzero ZFS results.
+- `true` records the failure, keeps the overall run failed, and continues with the next configured dataset.
+- `false` records the failure and stops cleanup immediately.
+- A failed destroy does not continue with later snapshots inside the same dataset; continuation, when enabled, resumes at the next configured dataset.
+- Configuration errors, missing input files, root-check failures, Python/process-start failures, and interrupts are not converted into recoverable dataset failures.
+
+When one or more dataset failures were continued, the application combines them into the final failure summary. The process exits with code `1`, old log pruning is skipped because the run was not successful, enabled failure mail uses the normal **FAILED** subject, and enabled MQTT publishes `status = "failure"` / `exit_code = 1`. The existing MQTT `error` field summarizes missing and other failed datasets, while `stderr` preserves bounded original ZFS diagnostics. MQTT failure reports are sent even during `dry-run`; `publish_dry_run` only controls successful preview reports.
 
 ## MQTT report format
 
@@ -242,12 +257,12 @@ A final MQTT message is JSON with these fields:
   "command": "delete",
   "dry_run": false,
   "comment": "",
-  "version": "0.0.6",
+  "version": "0.0.8",
   "timestamp": "2026-09-15T12:00:00+00:00"
 }
 ```
 
-`status` is `success` only for exit code 0. `warning` becomes true when error-level messages were logged during an otherwise successful MQTT-enabled run. Fatal command diagnostics include up to the last 4096 characters of stderr, or stdout if stderr is empty.
+`status` is `success` only for exit code 0. `warning` becomes true when error-level messages were logged during an otherwise successful MQTT-enabled run. Dataset failures can combine diagnostics from multiple datasets; the report includes up to the last 4096 characters of stderr, or stdout if stderr is empty.
 
 ## Home Assistant example
 
