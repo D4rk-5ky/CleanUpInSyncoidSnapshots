@@ -9,10 +9,10 @@ import glob
 import sys
 from typing import List, Tuple, Optional
 from config_loader import load_config, parse_older_than
-from mqtt_notifications import build_mqtt_report, notify_mqtt
+from mqtt_notifications import build_mqtt_report, notify_mqtt, should_send_notification
 
 
-__version__ = "0.0.8"
+__version__ = "0.0.12"
 
 
 class ReportWarningHandler(logging.Handler):
@@ -373,10 +373,11 @@ def delete_syncoid_snapshots(
     older_than: Optional[datetime.timedelta],
     retain_count: int,
     dry_run: bool,
-) -> None:
+) -> dict:
+    """Prune or preview one dataset and return counts for the final run report."""
     if not hostnames:
         logger.info(f"[{dataset}] No hostnames provided. Skipping syncoid pruning.")
-        return
+        return {"dataset": dataset, "matched": 0, "selected": 0}
 
     # Build one regex that matches any hostname in the list
     # <dataset>@syncoid_<hostname>_<timestamp>
@@ -393,7 +394,7 @@ def delete_syncoid_snapshots(
     )
     lines = [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()]
     if not lines:
-        return
+        return {"dataset": dataset, "matched": 0, "selected": 0}
 
     # Group snapshots by hostname
     by_host: dict[str, list[tuple[datetime.datetime, str]]] = {h: [] for h in hostnames}
@@ -416,6 +417,7 @@ def delete_syncoid_snapshots(
     cutoff_utc = (now_utc - older_than) if older_than else None
 
     total_delete = 0
+    total_matched = 0
 
     first_host_printed = True
 
@@ -427,6 +429,8 @@ def delete_syncoid_snapshots(
         if not first_host_printed:
             logger.info("")
         first_host_printed = False
+
+        total_matched += len(snaps)
 
         # Newest first
         snaps.sort(key=lambda x: x[0].astimezone(datetime.timezone.utc), reverse=True)
@@ -474,6 +478,33 @@ def delete_syncoid_snapshots(
         log_blank_line(logger)
         logger.info(f"[{dataset}] Syncoid pruning done. Deleted total: {total_delete}")
 
+    return {"dataset": dataset, "matched": total_matched, "selected": total_delete}
+
+
+def log_dry_run_report(logger: logging.Logger, report: dict) -> None:
+    """Write one final dry-run summary that is also captured by success/failure email logs."""
+    print_separator(logger)
+    logger.info("DRY-RUN REPORT")
+    logger.info(f"Datasets configured: {report['datasets_configured']}")
+    logger.info(f"Datasets completed: {report['datasets_completed']}")
+    logger.info(f"Dataset failures: {report['dataset_failures']}")
+    logger.info(f"Matching Syncoid snapshots found: {report['snapshots_matched']}")
+    logger.info(f"Snapshots that WOULD be deleted: {report['snapshots_would_delete']}")
+    logger.info("Snapshots actually destroyed: 0")
+    if report["log_retention_evaluated"]:
+        logger.info(f"Old log groups that WOULD be deleted: {report['log_groups_would_delete']}")
+        logger.info(f"Old log files that WOULD be deleted: {report['log_files_would_delete']}")
+    else:
+        logger.info("Old-log retention preview: not evaluated because the dry-run did not complete successfully.")
+    for item in report["datasets"]:
+        logger.info(
+            f"[{item['dataset']}] report: matched={item['matched']} "
+            f"would_delete={item['selected']}"
+        )
+    logger.info("Dry-run made no snapshot deletions and no old-log deletions.")
+    print_separator(logger)
+
+
 def delete_old_files(
     logger: logging.Logger,
     error_logger: logging.Logger,
@@ -482,8 +513,10 @@ def delete_old_files(
     older_than: Optional[datetime.timedelta],
     retain_count: int,
     dry_run: bool,
-) -> None:
+) -> dict:
     """
+    Apply log retention and return counts for the dry-run/finalization report.
+
     Log deletion rules mirror snapshot pruning:
       - If retain_count > 0: always keep newest retain_count timestamp groups.
       - If older_than is provided: delete groups older than cutoff (excluding kept).
@@ -491,7 +524,7 @@ def delete_old_files(
       - If older_than is None AND retain_count == 0: do nothing.
     """
     if older_than is None and retain_count <= 0:
-        return
+        return {"groups_matched": 0, "groups_selected": 0, "files_selected": 0}
 
     os.makedirs(log_folder, exist_ok=True)
 
@@ -513,7 +546,7 @@ def delete_old_files(
         files_by_ts.setdefault(ts, []).append(filename)
 
     if not files_by_ts:
-        return
+        return {"groups_matched": 0, "groups_selected": 0, "files_selected": 0}
 
     # Newest first
     all_dates = sorted(files_by_ts.keys(), reverse=True)
@@ -528,6 +561,8 @@ def delete_old_files(
     else:
         eligible = [d for d in all_dates if (d not in keep_set)]
 
+    selected_files = sum(len(files_by_ts.get(d, [])) for d in eligible)
+
     for d in eligible:
         for filename in files_by_ts.get(d, []):
             path_to_file = os.path.join(log_folder, filename)
@@ -539,6 +574,12 @@ def delete_old_files(
                     logger.info(f"Deleted file: {filename}")
                 except Exception as e:
                     error_logger.error(f"Failed to delete file: {filename}. Error: {e}")
+
+    return {
+        "groups_matched": len(all_dates),
+        "groups_selected": len(eligible),
+        "files_selected": selected_files,
+    }
 
 def main():
     default_script_name = script_base_name()
@@ -607,8 +648,17 @@ def main():
     finally:
         # Report only after existing mail and log cleanup have finished.
         if mqtt_config is not None:
-            report = build_mqtt_report(args, __version__, exit_code, failure, state.get("warning", False))
-            notify_mqtt(mqtt_config, report, state.get("error_logger"))
+            report = build_mqtt_report(
+                args,
+                __version__,
+                exit_code,
+                failure,
+                state.get("warning", False),
+                state.get("dry_run_report"),
+            )
+            report_success = report.get("status") == "success"
+            if should_send_notification(report_success, mqtt_config["on_success"]):
+                notify_mqtt(mqtt_config, report, state.get("error_logger"))
         warning_handler = state.get("warning_handler")
         if warning_handler:
             state["error_logger"].removeHandler(warning_handler)
@@ -645,7 +695,7 @@ def run_cleanup(args, state):
         error_logger.error(msg)
 
         try:
-            if args.send_mail:
+            if args.send_mail and should_send_notification(False, args.mail_on_success):
                 MailTo(
                     logger,
                     error_logger,
@@ -666,6 +716,20 @@ def run_cleanup(args, state):
     success = False
     dataset_failure = None
     dataset_failures = []
+    dry_run_report = None
+    if dry_run:
+        dry_run_report = {
+            "datasets_configured": 0,
+            "datasets_completed": 0,
+            "dataset_failures": 0,
+            "snapshots_matched": 0,
+            "snapshots_would_delete": 0,
+            "log_retention_evaluated": False,
+            "log_groups_would_delete": 0,
+            "log_files_would_delete": 0,
+            "datasets": [],
+        }
+        state["dry_run_report"] = dry_run_report
 
     try:
         # Read input files inside the try block, so bad paths also trigger error mail.
@@ -673,6 +737,8 @@ def run_cleanup(args, state):
             datasets = [ln.strip() for ln in file.read().splitlines() if ln.strip()]
 
         syncoid_hosts = read_hostnames(args.syncoid_hosts_file)
+        if dry_run_report is not None:
+            dry_run_report["datasets_configured"] = len(datasets)
 
         if args.command == 'delete':
             print_separator(logger)
@@ -681,7 +747,7 @@ def run_cleanup(args, state):
 
         for dataset in datasets:
             try:
-                delete_syncoid_snapshots(
+                dataset_report = delete_syncoid_snapshots(
                     logger,
                     error_logger,
                     dataset,
@@ -690,10 +756,17 @@ def run_cleanup(args, state):
                     retain_count,
                     dry_run,
                 )
+                if dry_run_report is not None:
+                    dry_run_report["datasets_completed"] += 1
+                    dry_run_report["snapshots_matched"] += dataset_report["matched"]
+                    dry_run_report["snapshots_would_delete"] += dataset_report["selected"]
+                    dry_run_report["datasets"].append(dataset_report)
             except CommandError as exc:
                 missing = is_missing_dataset_error(exc)
                 kind = "missing" if missing else "other"
                 dataset_failures.append((dataset, kind, exc))
+                if dry_run_report is not None:
+                    dry_run_report["dataset_failures"] = len(dataset_failures)
                 dataset_failure = DatasetFailuresError(dataset_failures)
                 state["error"] = dataset_failure
 
@@ -733,6 +806,13 @@ def run_cleanup(args, state):
             state["error"] = dataset_failure
             error_logger.error(str(dataset_failure))
         else:
+            if dry_run_report is not None:
+                log_report = delete_old_files(
+                    logger, error_logger, log_folder, prefix, older_than, retain_count, True
+                )
+                dry_run_report["log_retention_evaluated"] = True
+                dry_run_report["log_groups_would_delete"] = log_report["groups_selected"]
+                dry_run_report["log_files_would_delete"] = log_report["files_selected"]
             success = True
 
     except Exception as e:
@@ -740,44 +820,79 @@ def run_cleanup(args, state):
         raise
 
     finally:
+        if dry_run_report is not None:
+            dry_run_report["dataset_failures"] = len(dataset_failures)
+            log_dry_run_report(logger, dry_run_report)
+
+        if success:
+            if args.send_mail and not args.mail_on_success:
+                logger.info("Success mail report suppressed by mail.on_success=false.")
+            if args.mqtt_config and not args.mqtt_config["on_success"]:
+                logger.info("Success MQTT report suppressed by mqtt.on_success=false.")
+
         try:
-            if args.send_mail and not success:
+            if args.send_mail and should_send_notification(success, args.mail_on_success) and not success:
                 intro = "Cleanup failed. See attached logs."
                 if dataset_failure is not None:
                     intro = (
                         f"Cleanup completed or stopped with a failure because {dataset_failure} "
                         "See attached logs for the original ZFS diagnostics."
                     )
+                if dry_run:
+                    if dataset_failure is not None:
+                        intro = (
+                            f"Dry-run completed or stopped with a failure because {dataset_failure} "
+                            "No snapshots or old log files were deleted. "
+                            "See the dry-run report and attached logs for the original ZFS diagnostics."
+                        )
+                    else:
+                        intro = (
+                            "Dry-run failed. No snapshots or old log files were intentionally deleted. "
+                            "See the dry-run report and attached logs."
+                        )
                 MailTo(
                     logger,
                     error_logger,
                     recipient=args.send_mail,
                     log_folder=log_folder,
                     prefix=prefix,
-                    subject="Syncoid cleanup FAILED - logs attached",
+                    subject=(
+                        "Syncoid cleanup DRY-RUN FAILED - report/logs attached"
+                        if dry_run
+                        else "Syncoid cleanup FAILED - logs attached"
+                    ),
                     intro=intro,
                     backup_title=backup_title,
                     backup_comment=backup_comment,
                 )
 
-            # Send mail on SUCCESS only if explicitly requested
-            elif args.send_mail and success and args.mail_on_success:
+            # Success notifications are opt-in for both delete and dry-run.
+            elif args.send_mail and should_send_notification(success, args.mail_on_success) and success:
                 MailTo(
                     logger,
                     error_logger,
                     recipient=args.send_mail,
                     log_folder=log_folder,
                     prefix=prefix,
-                    subject="Syncoid cleanup SUCCESS - logs attached",
-                    intro="Cleanup completed successfully. Logs attached.",
+                    subject=(
+                        "Syncoid cleanup DRY-RUN SUCCESS - report/logs attached"
+                        if dry_run
+                        else "Syncoid cleanup SUCCESS - logs attached"
+                    ),
+                    intro=(
+                        "Dry-run completed successfully. No snapshots or old log files were deleted. "
+                        "The dry-run report is included below and in the attached log."
+                        if dry_run
+                        else "Cleanup completed successfully. Logs attached."
+                    ),
                     backup_title=backup_title,
                     backup_comment=backup_comment,
                 )
         except Exception as mail_e:
             error_logger.error(f"Failed to send notification mail: {mail_e}")
 
-        if success:
-            delete_old_files(logger, error_logger, log_folder, prefix, older_than, retain_count, dry_run)
+        if success and not dry_run:
+            delete_old_files(logger, error_logger, log_folder, prefix, older_than, retain_count, False)
 
         # Clean up empty .err file
         if os.path.exists(err_filepath) and os.path.getsize(err_filepath) == 0:

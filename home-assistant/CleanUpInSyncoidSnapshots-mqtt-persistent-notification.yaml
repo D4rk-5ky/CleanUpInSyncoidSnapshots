@@ -37,8 +37,9 @@ blueprint:
     notify_dry_run:
       name: Notify on dry-run reports
       description: >-
-        Allow notifications for dry-run reports. The cleanup application must
-        separately have publish_dry_run enabled before such reports are sent.
+        Allow notifications for dry-run reports. Successful dry-runs are only
+        published when mqtt.on_success=true; failed dry-runs are still published
+        whenever MQTT is enabled.
       default: true
       selector:
         boolean:
@@ -100,6 +101,19 @@ actions:
         **Command:** {{ trigger.payload_json.get('command', 'unknown') }}
 
         **Dry-run:** {{ 'Yes' if trigger.payload_json.get('dry_run', false) == true else 'No' }}
+        {% if trigger.payload_json.get('dry_run', false) == true
+              and trigger.payload_json.get('dry_run_report') is mapping %}
+        {% set dry = trigger.payload_json.get('dry_run_report') %}
+
+        **Dry-run report:**
+        - Datasets configured: {{ dry.get('datasets_configured', 0) }}
+        - Datasets completed: {{ dry.get('datasets_completed', 0) }}
+        - Dataset failures: {{ dry.get('dataset_failures', 0) }}
+        - Matching snapshots: {{ dry.get('snapshots_matched', 0) }}
+        - Snapshots that WOULD be deleted: {{ dry.get('snapshots_would_delete', 0) }}
+        - Old log groups that WOULD be deleted: {{ dry.get('log_groups_would_delete', 0) }}
+        - Old log files that WOULD be deleted: {{ dry.get('log_files_would_delete', 0) }}
+        {% endif %}
 
         **Exit code:** {{ trigger.payload_json.get('exit_code', 'unknown') }}
 

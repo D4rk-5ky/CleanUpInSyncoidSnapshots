@@ -58,7 +58,8 @@ enabled = false
 # `mail`/`mailx` command supporting -s and --attach.
 recipient = "you@example.com"
 
-# false = send mail only after failure. true = also send mail after success.
+# false = send mail only after failure; successful delete and dry-run runs do not invoke
+# the mail success path. true = also send mail after success.
 on_success = false
 
 [mqtt]
@@ -104,6 +105,8 @@ certfile = ""
 # Optional private key matching certfile. Encrypted-key passwords are not supported.
 keyfile = ""
 
-# By default successful dry-run preview reports are not published. Failure reports
-# are always published when MQTT is enabled. Set true to also publish successful previews.
-publish_dry_run = false
+# false = publish only failure reports; successful delete and dry-run runs do not invoke
+# the MQTT success notifier. true = also publish successful reports.
+# This rule is identical for normal delete runs and dry-run previews.
+# Failure reports are always published whenever MQTT is enabled.
+on_success = false
