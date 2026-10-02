@@ -43,7 +43,7 @@ SECTION_KEYS = {
         "ca_certs",
         "certfile",
         "keyfile",
-        "publish_dry_run",
+        "on_success",
     },
 }
 
@@ -76,6 +76,11 @@ def _table(document: dict, name: str, required: bool = False) -> dict:
     value = document[name]
     if not isinstance(value, dict):
         raise ValueError(f"[{name}] must be a TOML table")
+    if name == "mqtt" and "publish_dry_run" in value:
+        raise ValueError(
+            "mqtt.publish_dry_run was replaced by mqtt.on_success; "
+            "on_success controls successful delete and dry-run reports equally"
+        )
     unknown = set(value) - SECTION_KEYS[name]
     if unknown:
         raise ValueError(f"[{name}] contains unknown option(s): {', '.join(sorted(unknown))}")

@@ -1,12 +1,12 @@
 # CleanUpInSyncoidSnapshots
 
-CleanUpInSyncoidSnapshots removes matching Syncoid-created ZFS snapshots, can preview the exact deletion set first, prunes its own log groups with the same retention settings, and can optionally send email and MQTT JSON status reports.
+CleanUpInSyncoidSnapshots removes matching Syncoid-created ZFS snapshots, can preview the exact deletion set first, produces a final dry-run report, prunes its own log groups with the same retention settings, and can optionally send email and MQTT JSON status reports.
 
-Current application version: **0.0.8**.
+Current application version: **0.0.14**.
 
 ## Requirements
 
-- Linux with ZFS and Python **3.10 or newer**.
+- Linux with ZFS. Source-mode runs require Python **3.10 or newer**; the PyInstaller executable bundles its Python runtime.
 - Run cleanup as root with `sudo`.
 - `zfs` must be available in `PATH`.
 - Python 3.10 needs the `tomli` compatibility package from `requirements.txt`; Python 3.11+ uses the standard-library `tomllib` module.
@@ -27,6 +27,26 @@ If MQTT will be enabled, install its optional dependency as well:
 ```
 
 `requirements-mqtt.txt` includes the base requirements automatically.
+
+## Standalone PyInstaller build
+
+A one-file Linux executable can be built with the included PyInstaller release files:
+
+```bash
+./build-pyinstaller.sh
+```
+
+The build script recreates a clean `.venv-build/`, installs `requirements-build.txt`, removes old `build/` and `dist/` output, recreates `dist/` empty, and runs the included `CleanUpInSyncoidSnapshots.spec`. The final executable is left directly in:
+
+```text
+dist/CleanUpInSyncoidSnapshots
+```
+
+`requirements-build.txt` includes the normal MQTT dependency set, forces the `tomli` fallback module into the build environment, and installs PyInstaller. The spec explicitly collects all `paho` and `tomli` submodules; the application modules and Python standard-library/runtime pieces are collected by PyInstaller. This means the frozen executable does not require a separate Python, Paho MQTT, or Tomli installation at runtime. ZFS and the optional external `mail`/`mailx` program remain host tools and are not bundled.
+
+PyInstaller builds are platform/architecture specific. Build the executable on the Linux architecture where you intend to run it (or on a compatible build system); this project does not treat PyInstaller as a cross-compiler. Runtime TOML, dataset/hostname files, and optional TLS certificate/key files remain external and are supplied by the user.
+
+After PyInstaller finishes, the build script verifies that `dist/` contains **exactly one entry**: the executable `CleanUpInSyncoidSnapshots`. Any extra file, directory, or hidden entry in `dist/` makes the build fail. It then smoke-tests that executable with `--version` and `--help`.
 
 ## Configuration
 
@@ -59,7 +79,7 @@ The example defaults to `command = "dry-run"`, with both mail and MQTT disabled.
 | --- | --- | --- |
 | `prefix` | Script basename | Prefix for generated `.log` and `.err` files. Empty uses the script basename. |
 
-The application always creates and uses a `logs/` directory beside the actual `CleanUpInSyncoidSnapshots.py` file. It never falls back to `/tmp` or the current working directory. If that directory cannot be created or written, the run fails instead of silently placing logs somewhere else.
+The application always creates and uses a `logs/` directory beside the running application. Source runs place it beside `CleanUpInSyncoidSnapshots.py`; a PyInstaller build places it beside the frozen executable (normally `dist/logs/`). It never falls back to `/tmp` or the current working directory. If that directory cannot be created or written, the run fails instead of silently placing logs somewhere else.
 
 ### `[report]`
 
@@ -76,7 +96,7 @@ Mail is optional and disabled unless `enabled = true`.
 | --- | --- | --- |
 | `enabled` | `false` | Enables email delivery. |
 | `recipient` | `""` | Required to be non-empty when mail is enabled. |
-| `on_success` | `false` | `false` sends mail only on failure; `true` also sends mail after success. |
+| `on_success` | `false` | `false` sends mail only on failure; `true` also sends mail after success. A successful dry-run follows the same rule as a successful delete run. |
 
 Mail failure is logged but does not turn an otherwise successful cleanup into a fatal cleanup failure. When MQTT is enabled, such logged errors are reflected as `warning: true` in the final MQTT report.
 
@@ -99,9 +119,23 @@ MQTT is optional and disabled unless `enabled = true`.
 | `ca_certs` | `""` | Optional CA file. Empty uses system trust roots when TLS is enabled. |
 | `certfile` | `""` | Optional mutual-TLS client certificate. Requires `keyfile` and `tls = true`. |
 | `keyfile` | `""` | Optional matching private key. Requires `certfile` and `tls = true`. |
-| `publish_dry_run` | `false` | Controls successful dry-run preview reports. Failure reports are still published whenever MQTT is enabled; set `true` to also publish successful previews. |
+| `on_success` | `false` | `false` publishes MQTT only on failure; `true` also publishes after success. A successful dry-run follows the same rule as a successful delete run. |
 
 Certificate paths may be absolute or relative to the TOML file. MQTT messages are always published with `retain = false`. Credentials and report data are sent to the isolated publisher through standard input rather than command-line arguments. MQTT delivery failures are nonfatal and do not change the cleanup result.
+
+### Success/failure notification rule
+
+Email and MQTT intentionally use the same rule. `enabled` decides whether that channel is active; `on_success` decides whether successful runs are also reported. A dry-run uses the same success/failure decision as a normal delete run. The application now applies this decision at the lifecycle boundary before invoking either success-notification path; MQTT also keeps a second defensive check inside the publisher wrapper.
+
+| Channel enabled | `on_success` | Run result | Notification |
+| --- | --- | --- | --- |
+| `false` | either | success or failure | No notification through that channel. |
+| `true` | `false` | failure | Send/publish the failure report. |
+| `true` | `false` | success | Do not send/publish. |
+| `true` | `true` | failure | Send/publish the failure report. |
+| `true` | `true` | success | Send/publish the success report. |
+
+This means a failed dry-run still sends mail and/or MQTT through each enabled channel even when `on_success = false`, while a successful dry-run is silent unless `on_success = true` for that channel. On a successful delete or dry-run with an enabled channel and `on_success = false`, the local log records the exact suppression reason: `Success mail report suppressed by mail.on_success=false.` for mail and `Success MQTT report suppressed by mqtt.on_success=false.` for MQTT.
 
 ## Dataset and hostname files
 
@@ -155,6 +189,12 @@ When using the documented virtual environment:
 sudo .venv/bin/python CleanUpInSyncoidSnapshots.py -c config.toml
 ```
 
+When using the PyInstaller executable:
+
+```bash
+sudo ./dist/CleanUpInSyncoidSnapshots -c config.toml
+```
+
 To display help without running cleanup:
 
 ```bash
@@ -165,6 +205,13 @@ To display the installed application version without running cleanup:
 
 ```bash
 python3 CleanUpInSyncoidSnapshots.py --version
+```
+
+The frozen executable exposes the same CLI:
+
+```bash
+./dist/CleanUpInSyncoidSnapshots --help
+./dist/CleanUpInSyncoidSnapshots --version
 ```
 
 No other public operational flags are accepted. For example, `--command dry-run` is rejected because `command = "dry-run"` belongs in the TOML file. If no configuration option is supplied, argument parsing exits before cleanup starts.
@@ -214,7 +261,7 @@ No recursive or force flags are added. Any checked `zfs list` or `zfs destroy` f
 
 ## Log retention behavior
 
-`.log` and `.err` files sharing the same timestamp are treated as one log group. Successful `delete` runs prune eligible groups after snapshot processing. `dry-run` never removes old log groups, but it reports which ones would be removed.
+`.log` and `.err` files sharing the same timestamp are treated as one log group. Successful `delete` runs prune eligible groups after snapshot processing. `dry-run` never removes old log groups, but it previews them before the final dry-run report is written so the report and optional success notifications include the old-log candidate counts.
 
 Log retention uses the same `older_than` and `retain_count` settings as snapshot retention. With both disabled, log pruning does nothing. Log timestamps use local time. The current run's empty `.err` file is removed at the end.
 
@@ -238,7 +285,22 @@ continue_on_other_failures = true
 - A failed destroy does not continue with later snapshots inside the same dataset; continuation, when enabled, resumes at the next configured dataset.
 - Configuration errors, missing input files, root-check failures, Python/process-start failures, and interrupts are not converted into recoverable dataset failures.
 
-When one or more dataset failures were continued, the application combines them into the final failure summary. The process exits with code `1`, old log pruning is skipped because the run was not successful, enabled failure mail uses the normal **FAILED** subject, and enabled MQTT publishes `status = "failure"` / `exit_code = 1`. The existing MQTT `error` field summarizes missing and other failed datasets, while `stderr` preserves bounded original ZFS diagnostics. MQTT failure reports are sent even during `dry-run`; `publish_dry_run` only controls successful preview reports.
+When one or more dataset failures were continued, the application combines them into the final failure summary. The process exits with code `1`, old log pruning is skipped because the run was not successful, enabled failure mail uses a **FAILED** subject, and enabled MQTT publishes `status = "failure"` / `exit_code = 1`. The MQTT `error` field summarizes missing and other failed datasets, while `stderr` preserves bounded original ZFS diagnostics. Failure notifications ignore `on_success`, including during `dry-run`.
+
+## Dry-run report
+
+Every dry-run writes a final `DRY-RUN REPORT` to the normal log after snapshot selection. On a successful dry-run, old-log retention is previewed first so those counts are included too. The report contains:
+
+- configured dataset count;
+- successfully completed dataset count;
+- dataset failure count;
+- total matching Syncoid snapshot count;
+- total snapshots that **WOULD** be deleted;
+- per-dataset matched / would-delete counts;
+- old log groups and log files that **WOULD** be deleted when the dry-run completed successfully;
+- an explicit statement that zero snapshots were actually destroyed and no old logs were deleted.
+
+The final dry-run report is always written locally. A successful dry-run email includes it only when `mail.enabled = true` and `mail.on_success = true`. A successful MQTT dry-run report is published only when `mqtt.enabled = true` and `mqtt.on_success = true`; otherwise no success MQTT notifier is invoked. Failed dry-runs still produce the available partial snapshot report and still notify through each enabled channel regardless of `on_success`; old-log retention is marked as not evaluated because failed runs do not proceed to log retention. If the old-log preview itself fails, the dry-run becomes a failed run and follows the normal failure-notification rule.
 
 ## MQTT report format
 
@@ -257,18 +319,39 @@ A final MQTT message is JSON with these fields:
   "command": "delete",
   "dry_run": false,
   "comment": "",
-  "version": "0.0.8",
+  "version": "0.0.14",
   "timestamp": "2026-09-15T12:00:00+00:00"
 }
 ```
 
 `status` is `success` only for exit code 0. `warning` becomes true when error-level messages were logged during an otherwise successful MQTT-enabled run. Dataset failures can combine diagnostics from multiple datasets; the report includes up to the last 4096 characters of stderr, or stdout if stderr is empty.
 
+Dry-run MQTT reports additionally contain a `dry_run_report` object such as:
+
+```json
+{
+  "datasets_configured": 2,
+  "datasets_completed": 2,
+  "dataset_failures": 0,
+  "snapshots_matched": 18,
+  "snapshots_would_delete": 6,
+  "log_retention_evaluated": true,
+  "log_groups_would_delete": 1,
+  "log_files_would_delete": 2,
+  "datasets": [
+    {"dataset": "tank/data", "matched": 10, "selected": 4},
+    {"dataset": "tank/backups", "matched": 8, "selected": 2}
+  ]
+}
+```
+
+`selected` in each dataset entry means “would delete” when `dry_run = true`.
+
 ## Home Assistant example
 
 `home-assistant/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml` is a receive-only Home Assistant automation blueprint. Configure its MQTT topic to exactly match `[mqtt].topic` in your TOML file.
 
-The blueprint can independently show clean success, success-with-warning, failure, and dry-run notifications, and can either replace the previous notification or create separate notifications. It does not publish commands, start cleanup, or invoke ZFS.
+The blueprint can independently show clean success, success-with-warning, failure, and dry-run notifications, displays the aggregate dry-run counts when present, and can either replace the previous notification or create separate notifications. It does not publish commands, start cleanup, or invoke ZFS.
 
 ## Project files
 
@@ -278,6 +361,10 @@ The blueprint can independently show clean success, success-with-warning, failur
 - `mqtt_notifications.py` - optional MQTT validation, report construction, bounded publishing, and internal worker.
 - `requirements.txt` - Python 3.10 TOML compatibility dependency.
 - `requirements-mqtt.txt` - optional MQTT dependency plus base requirements.
+- `requirements-build.txt` - complete PyInstaller build dependency set, including MQTT and the TOML fallback.
+- `CleanUpInSyncoidSnapshots.spec` - one-file PyInstaller specification that explicitly collects Paho and Tomli runtime modules.
+- `build-pyinstaller.sh` - reproducible build helper; creates the build venv, recreates `dist/` empty, and fails unless the only final entry is `dist/CleanUpInSyncoidSnapshots`.
+- `dist/` - generated final-output directory. It is ignored by Git, deleted/recreated empty on every build, and must contain only `CleanUpInSyncoidSnapshots` when the build succeeds.
 - `datasets-example`, `hostnames-example` - input-file examples.
 - `home-assistant/` - receive-only Home Assistant MQTT notification blueprint.
 - `tests/test_project.py` - regression tests with ZFS/mail mocked and optional loopback MQTT integration tests.
