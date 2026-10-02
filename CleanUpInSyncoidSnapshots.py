@@ -9,10 +9,10 @@ import glob
 import sys
 from typing import List, Tuple, Optional
 from config_loader import load_config, parse_older_than
-from mqtt_notifications import build_mqtt_report, notify_mqtt, should_send_notification
+from mqtt_notifications import build_mqtt_report, notify_mqtt, publish_worker, should_send_notification
 
 
-__version__ = "0.0.12"
+__version__ = "0.0.14"
 
 
 class ReportWarningHandler(logging.Handler):
@@ -79,24 +79,34 @@ def setup_logger(log_folder: str, log_date: str, prefix: str) -> Tuple[logging.L
     return logger, error_logger, err_filepath
 
 
+def application_base_dir() -> str:
+    """Return the directory that owns runtime files in source and frozen builds.
+
+    PyInstaller one-file applications extract Python modules to a temporary directory,
+    so ``__file__`` is not a persistent location there. Frozen builds instead use the
+    real executable directory; source runs retain the historical script directory.
+    """
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.realpath(sys.executable))
+    return os.path.dirname(os.path.realpath(__file__))
+
+
 def get_script_log_folder() -> str:
-    """Create and return the fixed ``logs`` directory beside this script.
+    """Create and return the fixed ``logs`` directory beside the app/script.
 
     Log placement is intentionally deterministic: the application never falls back
-    to /tmp or the current working directory. If the script directory is not
+    to /tmp or the current working directory. If the application directory is not
     writable, directory creation raises an error instead of silently moving logs.
     """
-    script_dir = os.path.dirname(os.path.realpath(__file__))
-    log_folder = os.path.join(script_dir, "logs")
+    log_folder = os.path.join(application_base_dir(), "logs")
     os.makedirs(log_folder, exist_ok=True)
     return log_folder
 
 
-
 def script_base_name() -> str:
-    """Return script name without extension, safe for filenames."""
-    base = os.path.splitext(os.path.basename(__file__))[0]
-    # Replace spaces or weird chars just in case
+    """Return source-script or frozen-executable name without extension, filename-safe."""
+    source = sys.executable if getattr(sys, "frozen", False) else __file__
+    base = os.path.splitext(os.path.basename(source))[0]
     return re.sub(r"[^A-Za-z0-9._-]+", "_", base)
 
 
@@ -582,6 +592,15 @@ def delete_old_files(
     }
 
 def main():
+    # PyInstaller's frozen MQTT notifier relaunches this executable with a private
+    # environment marker. Credentials and report data remain on stdin, not argv.
+    if os.environ.get("CLEANUP_SYNCOID_INTERNAL_MQTT_WORKER") == "1":
+        try:
+            publish_worker()
+        except Exception:
+            sys.exit(1)
+        return
+
     default_script_name = script_base_name()
 
     # The application intentionally exposes one operational setting on the CLI:

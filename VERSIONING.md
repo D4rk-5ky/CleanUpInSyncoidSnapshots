@@ -11,6 +11,47 @@ The application version is `__version__` in CleanUpInSyncoidSnapshots.py.
 The supplied archive had no version identifier or version history. It is the
 unversioned baseline; 0.0.1 is the first numbered release, with no invented prior releases.
 
+## 0.0.14 — 2026-10-02
+
+### Enforce a single-file `dist/` build output
+
+- Bump the application/package version from 0.0.13 to 0.0.14.
+- Harden `build-pyinstaller.sh` so every build removes the previous `dist/` directory and recreates it empty before PyInstaller starts.
+- Pass explicit `--distpath` and `--workpath` locations so the final executable output and temporary PyInstaller work files cannot be mixed.
+- Add a strict post-build manifest guard: a successful build requires `dist/` to contain exactly one entry, `dist/CleanUpInSyncoidSnapshots`, and that entry must be a regular executable file. Any extra file, directory, or hidden entry causes the build to fail.
+- Keep the existing frozen `--version` and `--help` smoke checks after the single-file `dist/` validation.
+- Extend the PyInstaller regression test and current-use documentation/code map to enforce and explain the empty-before-build / executable-only-after-build rule.
+
+### Preserved safety behavior
+
+No cleanup, snapshot selection/destruction, dry-run, retention, dataset continuation, mail, MQTT, Home Assistant, configuration, or runtime notification behavior changed. This release only hardens the PyInstaller build-output layout.
+
+### Verification
+
+See `VERIFICATION.md` for automated, CLI, shell-syntax, manifest, and packaging checks plus the explicit limitation on producing a real frozen binary in this environment.
+
+## 0.0.13 — 2026-10-02
+
+### Add standalone PyInstaller release build
+
+- Bump the application/package version from 0.0.12 to 0.0.13.
+- Add `CleanUpInSyncoidSnapshots.spec` for a one-file PyInstaller build. The spec explicitly collects all Paho MQTT and Tomli submodules so the frozen runtime contains the optional MQTT implementation and TOML fallback instead of depending on separate runtime Python packages.
+- Add `requirements-build.txt`, which installs the normal MQTT dependency set, forces Tomli into the build environment, and installs PyInstaller.
+- Add `build-pyinstaller.sh`. It recreates a clean `.venv-build`, installs the complete build requirements, clears old `build/` and `dist/` output, builds the one-file executable, and smoke-tests its `--version` and `--help` actions.
+- Keep the final executable directly at `dist/CleanUpInSyncoidSnapshots`; no second `bin/` copy is created.
+- Add frozen-runtime path handling so persistent logs live beside the installed executable rather than inside PyInstaller's temporary one-file extraction directory. Source-mode log placement remains beside `CleanUpInSyncoidSnapshots.py`.
+- Make the timeout-isolated MQTT worker compatible with a frozen executable. Source mode still launches `mqtt_notifications.py --publish`; frozen mode relaunches the same executable with a private environment marker while report/config data and credentials remain on stdin instead of argv.
+- Add regression coverage for frozen runtime paths, frozen MQTT worker relaunching, the private worker route, dependency collection, clean build-environment creation, and the required `dist/` output path.
+- Update README/current code map with the build command, frozen run command, bundled-vs-external dependency boundaries, and `dist/` layout.
+
+### Preserved safety behavior
+
+Snapshot matching, dry-run no-destroy behavior, one-snapshot-at-a-time `zfs destroy`, retention, dataset continuation, mail/MQTT `on_success` rules, notification failure handling, and Home Assistant report behavior are unchanged. The PyInstaller changes only add an alternate packaging/runtime form and the minimum frozen-specific process/path adaptations required to preserve existing behavior.
+
+### Verification
+
+See `VERIFICATION.md` for source regression/CLI checks and the explicit limitation that this verification environment could not download PyInstaller/Paho/Tomli, so an actual frozen executable could not be produced here.
+
 ## 0.0.12 — 2026-10-02
 
 ### Make mail success-suppression reporting match MQTT

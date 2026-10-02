@@ -115,14 +115,23 @@ def notify_mqtt(config, report, error_logger=None):
     try:
         # stdin keeps credentials and report content out of the process command line.
         # A worker gives even DNS/connect/acknowledgement stalls a firm timeout.
+        if getattr(sys, "frozen", False):
+            command = [sys.executable]
+            worker_env = os.environ.copy()
+            worker_env["CLEANUP_SYNCOID_INTERNAL_MQTT_WORKER"] = "1"
+        else:
+            command = [sys.executable, "-B", os.path.abspath(__file__), "--publish"]
+            worker_env = None
+
         result = subprocess.run(
-            [sys.executable, "-B", os.path.abspath(__file__), "--publish"],
+            command,
             input=json.dumps({"config": config, "report": report}),
             text=True,
             encoding="utf-8",
             capture_output=True,
             timeout=config["timeout"],
             check=False,
+            env=worker_env,
         )
         if result.returncode:
             # Do not echo subprocess output: a library error might include credentials.
