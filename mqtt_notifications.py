@@ -21,8 +21,13 @@ DEFAULTS = {
     "ca_certs": None,
     "certfile": None,
     "keyfile": None,
-    "publish_dry_run": False,
+    "on_success": False,
 }
+
+
+def should_send_notification(success: bool, on_success: bool) -> bool:
+    """Return True for every failure, or for success only when explicitly enabled."""
+    return (not success) or on_success
 
 
 def validate_mqtt_config(supplied, base_dir):
@@ -48,7 +53,7 @@ def validate_mqtt_config(supplied, base_dir):
     timeout = config["timeout"]
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("mqtt.timeout must be a finite positive number of seconds")
-    for key in ("tls", "publish_dry_run"):
+    for key in ("tls", "on_success"):
         if type(config[key]) is not bool:
             raise ValueError(f"mqtt.{key} must be true or false")
     for key in ("username", "password", "ca_certs", "certfile", "keyfile"):
@@ -78,9 +83,9 @@ def validate_mqtt_config(supplied, base_dir):
     return config
 
 
-def build_mqtt_report(args, version, exit_code, error=None, warning=False):
-    """Use the Home Assistant automation's exact status names and JSON types."""
-    return {
+def build_mqtt_report(args, version, exit_code, error=None, warning=False, dry_run_report=None):
+    """Build the Home Assistant-facing JSON report, including dry-run summary when available."""
+    report = {
         "status": "success" if exit_code == 0 else "failure",
         "title": args.backup_title.strip() or "CleanUpInSyncoidSnapshots",
         "name": "CleanUpInSyncoidSnapshots",
@@ -95,25 +100,38 @@ def build_mqtt_report(args, version, exit_code, error=None, warning=False):
         "version": version,
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
+    if dry_run_report is not None:
+        report["dry_run_report"] = dry_run_report
+    return report
 
 
 def notify_mqtt(config, report, error_logger=None):
     """Send one final report without altering cleanup's exit status on delivery failure."""
     if config is None:
         return
-    if report["dry_run"] and report["status"] == "success" and not config["publish_dry_run"]:
+    success = report.get("status") == "success"
+    if not should_send_notification(success, config["on_success"]):
         return
     try:
         # stdin keeps credentials and report content out of the process command line.
         # A worker gives even DNS/connect/acknowledgement stalls a firm timeout.
+        if getattr(sys, "frozen", False):
+            command = [sys.executable]
+            worker_env = os.environ.copy()
+            worker_env["CLEANUP_SYNCOID_INTERNAL_MQTT_WORKER"] = "1"
+        else:
+            command = [sys.executable, "-B", os.path.abspath(__file__), "--publish"]
+            worker_env = None
+
         result = subprocess.run(
-            [sys.executable, "-B", os.path.abspath(__file__), "--publish"],
+            command,
             input=json.dumps({"config": config, "report": report}),
             text=True,
             encoding="utf-8",
             capture_output=True,
             timeout=config["timeout"],
             check=False,
+            env=worker_env,
         )
         if result.returncode:
             # Do not echo subprocess output: a library error might include credentials.

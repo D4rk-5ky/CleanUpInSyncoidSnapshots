@@ -1,0 +1,8 @@
+# Complete frozen-build dependency set.
+# Includes base TOML compatibility, MQTT support, and the PyInstaller build tool.
+-r requirements-mqtt.txt
+
+# Include the fallback TOML parser in the frozen bundle even when building on Python 3.11+.
+tomli>=2,<3
+
+pyinstaller>=6.11,<7
