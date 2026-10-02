@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import logging
+import os
 from pathlib import Path
 import socket
 import subprocess
@@ -319,7 +320,7 @@ class ReportTests(unittest.TestCase):
             "datasets": [],
         }
         report = mqtt.build_mqtt_report(
-            arguments(command="dry-run"), "0.0.12", 0, dry_run_report=summary
+            arguments(command="dry-run"), "0.0.14", 0, dry_run_report=summary
         )
         self.assertEqual(report["dry_run_report"], summary)
         self.assertTrue(report["dry_run"])
@@ -358,7 +359,7 @@ class ReportTests(unittest.TestCase):
                 mqtt.subprocess, "run", return_value=Mock(returncode=0)
             ) as launch:
                 report = mqtt.build_mqtt_report(
-                    arguments(command=command), "0.0.12", 1, RuntimeError("failed")
+                    arguments(command=command), "0.0.14", 1, RuntimeError("failed")
                 )
                 mqtt.notify_mqtt(mqtt_config, report)
                 launch.assert_called_once()
@@ -381,7 +382,7 @@ class ReportTests(unittest.TestCase):
             with self.subTest(command=command), patch.object(
                 mqtt.subprocess, "run", return_value=Mock(returncode=0)
             ) as launch:
-                report = mqtt.build_mqtt_report(arguments(command=command), "0.0.12", 0)
+                report = mqtt.build_mqtt_report(arguments(command=command), "0.0.14", 0)
                 mqtt.notify_mqtt(mqtt_config, report)
                 launch.assert_called_once()
                 self.assertEqual(
@@ -425,6 +426,66 @@ class ReportTests(unittest.TestCase):
         context.return_value.load_cert_chain.assert_called_once_with("client.pem", "client.key")
         self.assertFalse(single.call_args.kwargs["retain"])
         self.assertEqual(single.call_args.kwargs["auth"]["password"], "secret")
+
+
+class FrozenBuildTests(unittest.TestCase):
+    def test_frozen_runtime_paths_use_real_executable_directory(self):
+        with patch.object(app.sys, "frozen", True, create=True), \
+                patch.object(app.sys, "executable", "/opt/cleanup/CleanUpInSyncoidSnapshots"):
+            self.assertEqual(app.application_base_dir(), "/opt/cleanup")
+            self.assertEqual(app.script_base_name(), "CleanUpInSyncoidSnapshots")
+
+    def test_frozen_mqtt_worker_relaunches_same_executable_with_private_marker(self):
+        mqtt_config = dict(
+            mqtt.DEFAULTS, host="localhost", topic="status", on_success=True
+        )
+        report = mqtt.build_mqtt_report(arguments(), "0.0.14", 0)
+        with patch.object(mqtt.sys, "frozen", True, create=True), \
+                patch.object(mqtt.sys, "executable", "/opt/cleanup/CleanUpInSyncoidSnapshots"), \
+                patch.object(mqtt.subprocess, "run", return_value=Mock(returncode=0)) as launch:
+            mqtt.notify_mqtt(mqtt_config, report)
+        call = launch.call_args
+        self.assertEqual(call.args[0], ["/opt/cleanup/CleanUpInSyncoidSnapshots"])
+        self.assertEqual(call.kwargs["env"]["CLEANUP_SYNCOID_INTERNAL_MQTT_WORKER"], "1")
+        self.assertEqual(json.loads(call.kwargs["input"])["report"], report)
+        self.assertNotIn("password", " ".join(call.args[0]).lower())
+
+    def test_internal_frozen_worker_bypasses_public_cli_parser(self):
+        with patch.dict(
+            app.os.environ, {"CLEANUP_SYNCOID_INTERNAL_MQTT_WORKER": "1"}, clear=False
+        ), patch.object(app, "publish_worker") as worker, patch.object(
+            app, "load_config"
+        ) as load_config:
+            app.main()
+        worker.assert_called_once_with()
+        load_config.assert_not_called()
+
+    def test_pyinstaller_build_files_bundle_runtime_dependencies(self):
+        requirements = (ROOT / "requirements-build.txt").read_text(encoding="utf-8")
+        spec = (ROOT / "CleanUpInSyncoidSnapshots.spec").read_text(encoding="utf-8")
+        build_script = (ROOT / "build-pyinstaller.sh").read_text(encoding="utf-8")
+        self.assertIn("-r requirements-mqtt.txt", requirements)
+        self.assertIn("tomli>=2,<3", requirements)
+        self.assertIn("pyinstaller", requirements.lower())
+        self.assertIn('collect_submodules("paho")', spec)
+        self.assertIn('collect_submodules("tomli")', spec)
+        self.assertIn('rm -rf "$VENV_DIR" build "$DIST_DIR"', build_script)
+        self.assertIn('mkdir -p "$DIST_DIR"', build_script)
+        self.assertIn('"$VENV_DIR/bin/python" -m pip install -r requirements-build.txt', build_script)
+        self.assertNotIn("pip install --upgrade pip", build_script)
+        self.assertIn('--distpath "$DIST_DIR"', build_script)
+        self.assertIn('--workpath "$PROJECT_DIR/build"', build_script)
+        self.assertIn('CleanUpInSyncoidSnapshots.spec', build_script)
+        self.assertIn('DIST_EXE="$DIST_DIR/CleanUpInSyncoidSnapshots"', build_script)
+        self.assertIn("mapfile -d '' DIST_ENTRIES", build_script)
+        self.assertIn('"${#DIST_ENTRIES[@]}" -ne 1', build_script)
+        self.assertIn('"${DIST_ENTRIES[0]}" != "$DIST_EXE"', build_script)
+        self.assertIn('! -f "$DIST_EXE"', build_script)
+        self.assertIn('! -x "$DIST_EXE"', build_script)
+        self.assertIn('"$DIST_EXE" --version', build_script)
+        self.assertIn('"$DIST_EXE" --help', build_script)
+        self.assertNotIn("bin/CleanUpInSyncoidSnapshots", build_script)
+
 
 
 class BlueprintTests(unittest.TestCase):

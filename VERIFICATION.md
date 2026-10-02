@@ -1,79 +1,131 @@
-# Verification — CleanUpInSyncoidSnapshots 0.0.12
+# Verification — CleanUpInSyncoidSnapshots 0.0.14
 
 Verification date: 2026-10-02.
 
 ## Requested behavior
 
-This release adds the mail-side local suppression report that mirrors the existing MQTT suppression report.
+This release hardens the PyInstaller output layout. Every build must start with an empty `dist/` directory and a successful build must finish with exactly one entry:
 
-For a **successful delete** or a **successful dry-run**:
+```text
+dist/CleanUpInSyncoidSnapshots
+```
 
-- if mail is enabled and `mail.on_success=false`, the normal log contains exactly:
-  `Success mail report suppressed by mail.on_success=false.`
-- if MQTT is enabled and `mqtt.on_success=false`, the normal log contains exactly:
-  `Success MQTT report suppressed by mqtt.on_success=false.`
+No other file, directory, hidden file, metadata file, or copied support file is allowed in `dist/`.
 
-The notification policy itself is unchanged:
+`build-pyinstaller.sh` now:
 
-- success + `on_success=false` -> suppress that channel's success notification;
-- success + `on_success=true` -> send/publish that channel's success notification;
-- failure -> send/publish through every enabled channel regardless of `on_success`;
-- disabled channels never send/publish.
+1. removes the previous build venv, `build/`, and `dist/`;
+2. recreates `dist/` empty;
+3. creates the isolated build environment and installs `requirements-build.txt`;
+4. runs PyInstaller with explicit `--distpath` and `--workpath` locations;
+5. enumerates every direct entry in `dist/` including hidden entries;
+6. fails unless the only entry is the regular executable `CleanUpInSyncoidSnapshots`;
+7. smoke-tests that executable with `--version` and `--help`.
 
-Dry-run remains non-destructive and follows the same notification/suppression policy as delete mode.
+Temporary PyInstaller work files remain under `build/`, not `dist/`.
 
 ## Automated tests
 
 Command:
 
 ```text
-python3 -m unittest discover -s tests
+python3 -B -m unittest discover -s tests -v
 ```
 
-Final result:
+Result:
 
 ```text
-Ran 65 tests
+Ran 69 tests
 OK (skipped=3)
 ```
 
-That is **62 passed, 3 skipped, 0 failed**.
+That is **66 passed, 3 skipped, 0 failed**.
 
-The three skipped tests are the optional real-Paho MQTT broker/loopback tests because the optional `paho-mqtt` dependency is not installed in this verification environment.
+The three skipped tests are the optional real-Paho MQTT broker/loopback tests because `paho-mqtt` is not installed in this verification environment.
 
-New regression coverage verifies that the exact line
-`Success mail report suppressed by mail.on_success=false.` is logged for both successful `delete` and successful `dry-run` executions while the mail sender itself remains uncalled.
+The PyInstaller regression now checks that the build helper:
 
-Existing regressions still verify that successful dry-runs with both channels enabled and both `on_success=false` invoke neither mail nor MQTT notification path, while failed dry-runs still invoke both enabled channels.
+- deletes the old `dist/` and recreates it;
+- uses explicit PyInstaller dist/work paths;
+- expects `dist/CleanUpInSyncoidSnapshots`;
+- counts all top-level `dist/` entries;
+- requires exactly one entry;
+- requires that entry to be the expected regular executable;
+- retains the frozen `--version` and `--help` smoke checks;
+- creates no `bin/` copy.
 
-## Compile and CLI checks
+## Build-output guard simulation
 
-The following modules compiled successfully with `python3 -m py_compile`:
+The build helper was exercised with a local fake PyInstaller runner so the shell lifecycle and final-output guard could be tested without downloading external packages.
+
+Clean-output case:
+
+```text
+CleanUpInSyncoidSnapshots 0.0.14
+Built: .../dist/CleanUpInSyncoidSnapshots
+Verified: dist/ contains only CleanUpInSyncoidSnapshots
+```
+
+The resulting simulated `dist/` manifest contained exactly:
+
+```text
+CleanUpInSyncoidSnapshots
+```
+
+Extra-output case: the fake PyInstaller runner additionally created `dist/extra.txt`. The build helper correctly exited with status 1 and reported:
+
+```text
+ERROR: dist/ must contain exactly one executable: .../dist/CleanUpInSyncoidSnapshots
+Current dist/ contents:
+  extra.txt
+  CleanUpInSyncoidSnapshots
+```
+
+This verifies the new shell-level single-file guard. It is not a substitute for a real PyInstaller freeze.
+
+## Compile, shell, and CLI checks
+
+The following compile successfully with `python3 -m py_compile`:
 
 - `CleanUpInSyncoidSnapshots.py`
 - `config_loader.py`
 - `mqtt_notifications.py`
 - `tests/test_project.py`
+- `CleanUpInSyncoidSnapshots.spec` (syntax only)
+
+`bash -n build-pyinstaller.sh` succeeds.
 
 `python3 CleanUpInSyncoidSnapshots.py --version` returns:
 
 ```text
-CleanUpInSyncoidSnapshots.py 0.0.12
+CleanUpInSyncoidSnapshots.py 0.0.14
 ```
 
-`python3 CleanUpInSyncoidSnapshots.py --help` exits successfully and documents the public `-h/--help`, `--version`, and `-c/--config` options. Operational behavior remains TOML-configured.
+`python3 CleanUpInSyncoidSnapshots.py --help` exits successfully and documents the public `-h/--help`, `--version`, and `-c/--config` options.
+
+## Real PyInstaller limitation
+
+A real one-file executable was not produced in this verification environment because PyInstaller, Paho MQTT, and Tomli are not installed here and this environment cannot download them from the external Python package index.
+
+The actual build should therefore be run on the target/compatible Linux build system with:
+
+```text
+./build-pyinstaller.sh
+```
+
+On that system the script itself will reject any successful-looking build that leaves anything other than the single executable in `dist/`.
 
 ## Documentation/config checks
 
-- `README.md` describes current 0.0.12 behavior only and documents the exact mail and MQTT suppression messages.
-- `VERSIONING.md` contains the 0.0.12 release record and preserves prior release history.
-- `commented_code_map.md` identifies the lifecycle behavior and regression test for both delete and dry-run mail suppression reporting.
-- `config-example.toml` is unchanged because no configuration key or default changed in 0.0.12.
-- `DISCLAIMER.md` is unchanged from 0.0.11.
+- `README.md` documents the empty-before-build and executable-only-after-build `dist/` rule.
+- `VERSIONING.md` records the 0.0.14 release.
+- `commented_code_map.md` documents the strict build command and regression behavior.
+- `config-example.toml` is unchanged because no runtime configuration changed.
+- `DISCLAIMER.md` is unchanged.
 
-## 0.0.11-to-0.0.12 manifest comparison
+## 0.0.13-to-0.0.14 manifest comparison
 
-The supplied 0.0.11 archive contains **17 project files**. The 0.0.12 source keeps the same **17 relative project file paths**; no required project file was added or removed.
+Both releases contain the same **20 project files**. No project file was added or removed.
 
 Intentionally changed project files:
 
@@ -81,13 +133,16 @@ Intentionally changed project files:
 - `README.md`
 - `VERIFICATION.md`
 - `VERSIONING.md`
+- `build-pyinstaller.sh`
 - `commented_code_map.md`
 - `tests/test_project.py`
 
-All other project files remain byte-for-byte unchanged from 0.0.11.
+All other project files remain byte-for-byte unchanged from 0.0.13.
+
+`CleanUpInSyncoidSnapshots.py` and `build-pyinstaller.sh` retain executable mode `0755` in the prepared source tree.
 
 ## Safety and limitations
 
-No snapshot-selection, ZFS destroy, retention, dataset-continuation, mail-delivery, MQTT-delivery, or Home Assistant logic was changed in this release. The change is limited to the local mail success-suppression report, version/docs, and regression coverage.
+No snapshot selection, ZFS destruction, dry-run, retention, dataset continuation, configuration, mail, MQTT, Home Assistant, or notification-policy behavior changed in 0.0.14.
 
-No real ZFS destruction, production mail delivery, production MQTT broker connection, or Home Assistant runtime test was performed. Those external/integration behaviors remain covered only by existing mocked/static tests in this environment.
+No real ZFS destruction, production mail delivery, production MQTT broker connection, Home Assistant runtime test, or real PyInstaller frozen-runtime test was performed.

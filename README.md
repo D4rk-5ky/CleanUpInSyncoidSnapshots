@@ -2,11 +2,11 @@
 
 CleanUpInSyncoidSnapshots removes matching Syncoid-created ZFS snapshots, can preview the exact deletion set first, produces a final dry-run report, prunes its own log groups with the same retention settings, and can optionally send email and MQTT JSON status reports.
 
-Current application version: **0.0.12**.
+Current application version: **0.0.14**.
 
 ## Requirements
 
-- Linux with ZFS and Python **3.10 or newer**.
+- Linux with ZFS. Source-mode runs require Python **3.10 or newer**; the PyInstaller executable bundles its Python runtime.
 - Run cleanup as root with `sudo`.
 - `zfs` must be available in `PATH`.
 - Python 3.10 needs the `tomli` compatibility package from `requirements.txt`; Python 3.11+ uses the standard-library `tomllib` module.
@@ -27,6 +27,26 @@ If MQTT will be enabled, install its optional dependency as well:
 ```
 
 `requirements-mqtt.txt` includes the base requirements automatically.
+
+## Standalone PyInstaller build
+
+A one-file Linux executable can be built with the included PyInstaller release files:
+
+```bash
+./build-pyinstaller.sh
+```
+
+The build script recreates a clean `.venv-build/`, installs `requirements-build.txt`, removes old `build/` and `dist/` output, recreates `dist/` empty, and runs the included `CleanUpInSyncoidSnapshots.spec`. The final executable is left directly in:
+
+```text
+dist/CleanUpInSyncoidSnapshots
+```
+
+`requirements-build.txt` includes the normal MQTT dependency set, forces the `tomli` fallback module into the build environment, and installs PyInstaller. The spec explicitly collects all `paho` and `tomli` submodules; the application modules and Python standard-library/runtime pieces are collected by PyInstaller. This means the frozen executable does not require a separate Python, Paho MQTT, or Tomli installation at runtime. ZFS and the optional external `mail`/`mailx` program remain host tools and are not bundled.
+
+PyInstaller builds are platform/architecture specific. Build the executable on the Linux architecture where you intend to run it (or on a compatible build system); this project does not treat PyInstaller as a cross-compiler. Runtime TOML, dataset/hostname files, and optional TLS certificate/key files remain external and are supplied by the user.
+
+After PyInstaller finishes, the build script verifies that `dist/` contains **exactly one entry**: the executable `CleanUpInSyncoidSnapshots`. Any extra file, directory, or hidden entry in `dist/` makes the build fail. It then smoke-tests that executable with `--version` and `--help`.
 
 ## Configuration
 
@@ -59,7 +79,7 @@ The example defaults to `command = "dry-run"`, with both mail and MQTT disabled.
 | --- | --- | --- |
 | `prefix` | Script basename | Prefix for generated `.log` and `.err` files. Empty uses the script basename. |
 
-The application always creates and uses a `logs/` directory beside the actual `CleanUpInSyncoidSnapshots.py` file. It never falls back to `/tmp` or the current working directory. If that directory cannot be created or written, the run fails instead of silently placing logs somewhere else.
+The application always creates and uses a `logs/` directory beside the running application. Source runs place it beside `CleanUpInSyncoidSnapshots.py`; a PyInstaller build places it beside the frozen executable (normally `dist/logs/`). It never falls back to `/tmp` or the current working directory. If that directory cannot be created or written, the run fails instead of silently placing logs somewhere else.
 
 ### `[report]`
 
@@ -169,6 +189,12 @@ When using the documented virtual environment:
 sudo .venv/bin/python CleanUpInSyncoidSnapshots.py -c config.toml
 ```
 
+When using the PyInstaller executable:
+
+```bash
+sudo ./dist/CleanUpInSyncoidSnapshots -c config.toml
+```
+
 To display help without running cleanup:
 
 ```bash
@@ -179,6 +205,13 @@ To display the installed application version without running cleanup:
 
 ```bash
 python3 CleanUpInSyncoidSnapshots.py --version
+```
+
+The frozen executable exposes the same CLI:
+
+```bash
+./dist/CleanUpInSyncoidSnapshots --help
+./dist/CleanUpInSyncoidSnapshots --version
 ```
 
 No other public operational flags are accepted. For example, `--command dry-run` is rejected because `command = "dry-run"` belongs in the TOML file. If no configuration option is supplied, argument parsing exits before cleanup starts.
@@ -286,7 +319,7 @@ A final MQTT message is JSON with these fields:
   "command": "delete",
   "dry_run": false,
   "comment": "",
-  "version": "0.0.12",
+  "version": "0.0.14",
   "timestamp": "2026-09-15T12:00:00+00:00"
 }
 ```
@@ -328,6 +361,10 @@ The blueprint can independently show clean success, success-with-warning, failur
 - `mqtt_notifications.py` - optional MQTT validation, report construction, bounded publishing, and internal worker.
 - `requirements.txt` - Python 3.10 TOML compatibility dependency.
 - `requirements-mqtt.txt` - optional MQTT dependency plus base requirements.
+- `requirements-build.txt` - complete PyInstaller build dependency set, including MQTT and the TOML fallback.
+- `CleanUpInSyncoidSnapshots.spec` - one-file PyInstaller specification that explicitly collects Paho and Tomli runtime modules.
+- `build-pyinstaller.sh` - reproducible build helper; creates the build venv, recreates `dist/` empty, and fails unless the only final entry is `dist/CleanUpInSyncoidSnapshots`.
+- `dist/` - generated final-output directory. It is ignored by Git, deleted/recreated empty on every build, and must contain only `CleanUpInSyncoidSnapshots` when the build succeeds.
 - `datasets-example`, `hostnames-example` - input-file examples.
 - `home-assistant/` - receive-only Home Assistant MQTT notification blueprint.
 - `tests/test_project.py` - regression tests with ZFS/mail mocked and optional loopback MQTT integration tests.

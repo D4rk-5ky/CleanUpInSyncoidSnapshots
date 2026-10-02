@@ -19,6 +19,7 @@ __pycache__/
 .tox/
 .nox/
 .venv/
+.venv-build/
 venv/
 env/
 build/
