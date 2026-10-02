@@ -11,6 +11,139 @@ The application version is `__version__` in CleanUpInSyncoidSnapshots.py.
 The supplied archive had no version identifier or version history. It is the
 unversioned baseline; 0.0.1 is the first numbered release, with no invented prior releases.
 
+## 0.0.12 — 2026-10-02
+
+### Make mail success-suppression reporting match MQTT
+
+- Bump the application/package version from 0.0.11 to 0.0.12.
+- Change the local mail suppression message to `Success mail report suppressed by mail.on_success=false.` so it mirrors `Success MQTT report suppressed by mqtt.on_success=false.`.
+- The message is emitted after every successful run, including both normal delete mode and dry-run, whenever mail is enabled and `mail.on_success=false`.
+- Notification behavior itself is unchanged: suppressed successes send neither mail nor MQTT; failures still notify through each enabled channel regardless of `on_success`.
+- Add regression coverage for the exact mail suppression message in both delete and dry-run modes.
+
+### Preserved safety behavior
+
+No snapshot selection, destruction, dry-run safety, dataset continuation, log retention, mail delivery, MQTT delivery, or Home Assistant behavior changed in this release.
+
+### Verification
+
+See `VERIFICATION.md` for the final automated, CLI, documentation, manifest, and package checks.
+
+## 0.0.11 — 2026-10-02
+
+### Harden success-notification suppression for dry-run
+
+- Bump the application/package version from 0.0.10 to 0.0.11.
+- Add one shared `should_send_notification(success, on_success)` policy helper and use it for both
+  mail and MQTT decisions. Failure remains notification-on for every enabled channel; success remains
+  opt-in through that channel's `on_success=true`.
+- Apply the MQTT success gate in `main()` before `notify_mqtt` is called. This means a successful
+  delete or dry-run with `mqtt.on_success=false` does not enter the MQTT notification path at all.
+- Keep the existing defensive gate inside `notify_mqtt` as a second layer, so direct/internal callers
+  also cannot publish successful reports while `on_success=false`.
+- Apply the same shared helper to mail success/failure selection, including the root-check failure
+  path, so mail and MQTT use one truth table instead of separate policy expressions.
+- Log explicit local suppression messages after successful runs when an enabled channel has
+  `on_success=false`. This makes it visible in the local report why no success notification was sent.
+- Add an end-to-end regression for the reported case: successful `dry-run`, mail enabled, MQTT
+  enabled, and `on_success=false` on both must invoke neither notification path.
+- Add the paired failure regression proving a failed dry-run still invokes both enabled channels
+  when both `on_success=false`, preserving the requested failure behavior.
+- Update current-use documentation, code map, config comments, and verification evidence.
+
+### Preserved safety behavior
+
+Dry-run reporting and snapshot/log selection are unchanged. Dry-run still never calls `zfs destroy`
+or removes old logs. Dataset continuation, final failure semantics, root enforcement, one-snapshot-at-a-time
+destruction, mail/MQTT enablement, non-retained MQTT transport, and notification-delivery failure handling
+remain unchanged.
+
+### Verification
+
+See `VERIFICATION.md` for the final automated, CLI, documentation, manifest, and package checks.
+
+## 0.0.10 — 2026-10-02
+
+### Unified success notifications and complete dry-run reporting
+
+- Bump the application/package version from 0.0.9 to 0.0.10.
+- Give MQTT the same `on_success` setting already used by mail. For either notification channel,
+  `enabled=true` + `on_success=false` means failure-only notifications, while `on_success=true`
+  also enables success notifications.
+- Apply the same rule to normal delete runs and dry-run previews. A successful dry-run is silent on
+  a channel unless that channel's `on_success=true`; a failed dry-run is still reported through every
+  enabled channel regardless of `on_success`.
+- Replace the old MQTT-only `publish_dry_run` setting with `mqtt.on_success`. Configs still using
+  `publish_dry_run` fail validation with a targeted migration message instead of being accepted with
+  ambiguous semantics.
+- Add a final dry-run report with configured/completed dataset counts, dataset failure count, matching
+  snapshot count, total snapshots that would be deleted, per-dataset counts, and old-log retention
+  candidate counts. The report explicitly records that zero snapshots were actually destroyed.
+- Make snapshot pruning return aggregate selection counts and make log-retention processing return
+  selected log-group/file counts so the final report is based on the same selection logic used by the
+  cleanup itself rather than duplicated calculations.
+- On successful dry-runs, preview old-log retention before writing/sending the final report. This keeps
+  dry-run non-destructive while ensuring success email and MQTT reports include the log-retention
+  preview. Normal delete-run finalization order remains unchanged so mail can still use the current logs
+  before old-log pruning.
+- Add the aggregate `dry_run_report` object to MQTT dry-run payloads. Update the Home Assistant
+  receive-only blueprint to display those counts when present.
+- Give dry-run mail distinct `DRY-RUN SUCCESS` / `DRY-RUN FAILED` subjects and report-oriented body
+  text while preserving the existing failure-always / success-opt-in rules.
+- Extend regression coverage for mail/MQTT success gating, failure delivery during dry-run, dry-run
+  aggregate counts, log-retention counts, the MQTT report object, the Home Assistant blueprint, and the
+  removed `publish_dry_run` migration error.
+- Update `README.md`, `commented_code_map.md`, `config-example.toml`, and `VERIFICATION.md` for the
+  current 0.0.10 behavior.
+
+### Preserved safety behavior
+
+Dry-run still never calls `zfs destroy` and never removes old log files. Snapshot matching, retention
+selection, exact configured hostname matching, one-snapshot-at-a-time destruction, no-shell ZFS
+execution, root enforcement, dataset continuation/final-failure semantics, deterministic log location,
+non-retained MQTT publishing, timeout-isolated MQTT delivery, and optional notification channels remain
+intact. Notification-delivery failures remain nonfatal to the cleanup result.
+
+### Verification
+
+See `VERIFICATION.md` for automated tests, compile/CLI checks, manifest/package checks, and live-system
+limitations.
+
+## 0.0.9 — 2026-10-02
+
+### Release-hygiene correction and workflow baseline
+
+- Bump the application/package version from 0.0.8 to 0.0.9.
+- Correct the shipped `.gitignore` example exceptions so `datasets-example`, `hostnames-example`,
+  and `config-example.toml` are actually unignored. The 0.0.8 archive used malformed `! ` rules
+  and referenced `config-example.json`, causing its own TOML-example regression test to fail.
+- Expand `.gitignore` to cover Python bytecode/cache directories, virtual environments, test/tool
+  caches, build/dist/egg-info outputs, coverage output, and common temporary/editor files. This
+  aligns repository hygiene with the release rule that generated cache/build/temp artifacts must
+  not be packaged.
+- Strengthen the existing `.gitignore` regression test so it protects the corrected example
+  exceptions, required cache/build/temp exclusions, and rejects malformed spaced negation rules.
+- Keep runtime cleanup, retention, ZFS command selection, continuation behavior, logging, mail,
+  MQTT transport/schema, Home Assistant blueprint behavior, and TOML schema unchanged.
+- Keep `config-example.toml` unchanged because no runtime setting was added or removed and its
+  schema coverage test still verifies every supported option.
+- Preserve the supplied disclaimer text and project-specific data-loss warning unchanged.
+- Update README.md and commented_code_map.md for the current 0.0.9 release and refresh
+  `VERIFICATION.md` with the actual baseline discrepancy and final release checks.
+- Keep the project manifest at the same 17 relative project files as the supplied 0.0.8 archive.
+
+### Preserved safety behavior
+
+Snapshot matching, exact configured hostname matching, dry-run protection, one-snapshot-at-a-time
+`zfs destroy`, no-shell ZFS execution, root enforcement, dataset-failure continuation/final-failure
+semantics, deterministic log location, optional mail/MQTT behavior, non-retained MQTT publishing,
+and the timeout-isolated MQTT worker are unchanged.
+
+### Verification
+
+See `VERIFICATION.md` for baseline findings, final tests, CLI/compile checks, manifest/package checks,
+and live-system limitations.
+
 ## 0.0.8 — 2026-09-28
 
 ### Configurable continuation for missing and other ZFS dataset failures

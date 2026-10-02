@@ -35,7 +35,7 @@ def arguments(**overrides):
     return argparse.Namespace(**dict(values, **overrides))
 
 
-def write_config(directory: Path, *, command="delete", mqtt_enabled=False,
+def write_config(directory: Path, *, command="delete", mqtt_enabled=False, mqtt_on_success=False,
                  mail_enabled=False, mail_on_success=False,
                  continue_on_missing_dataset=True, continue_on_other_failures=True,
                  extra="") -> Path:
@@ -80,7 +80,7 @@ tls = false
 ca_certs = ""
 certfile = ""
 keyfile = ""
-publish_dry_run = false
+on_success = {str(mqtt_on_success).lower()}
 {extra}
 '''
     path.write_text(text, encoding="utf-8")
@@ -206,9 +206,25 @@ recipient=""
         self.assertEqual(stdout.getvalue().strip(), f"cleanup {app.__version__}")
         cleanup.assert_not_called()
 
-    def test_gitignore_keeps_toml_example_trackable(self):
+    def test_gitignore_keeps_examples_and_excludes_release_artifacts(self):
         rules = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
         self.assertIn("!config-example.toml", rules)
+        self.assertIn("!datasets-example", rules)
+        self.assertIn("!hostnames-example", rules)
+        for pattern in (
+            "__pycache__/",
+            "*.pyc",
+            "*.pyo",
+            ".pytest_cache/",
+            ".cache/",
+            ".venv/",
+            "build/",
+            "dist/",
+            "*.tmp",
+            "*.temp",
+        ):
+            self.assertIn(pattern, rules)
+        self.assertFalse(any(rule.startswith("! ") for rule in rules))
 
     def test_cli_long_config_alias_loads_same_toml(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -228,7 +244,7 @@ class MqttConfigTests(unittest.TestCase):
     def test_defaults(self):
         loaded = self.validate()
         self.assertEqual(loaded["qos"], 1)
-        self.assertFalse(loaded["publish_dry_run"])
+        self.assertFalse(loaded["on_success"])
         self.assertIsNone(loaded["username"])
         self.assertIsNone(loaded["password"])
 
@@ -256,6 +272,21 @@ class MqttConfigTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 mqtt.validate_mqtt_config(value, Path.cwd())
 
+    def test_removed_publish_dry_run_has_clear_migration_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            path = write_config(folder)
+            text = path.read_text(encoding="utf-8")
+            marker = "[mqtt]\n"
+            before, mqtt_text = text.split(marker, 1)
+            mqtt_text = mqtt_text.replace(
+                "on_success = false", "publish_dry_run = true", 1
+            )
+            text = before + marker + mqtt_text
+            path.write_text(text, encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, r"mqtt\.publish_dry_run was replaced by mqtt\.on_success"):
+                config.load_config(path, "fallback")
+
     def test_relative_certificate_paths(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
@@ -278,6 +309,21 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(report["error"], "")
         self.assertEqual(json.loads(json.dumps(report)), report)
 
+    def test_dry_run_report_summary_is_included_in_mqtt_payload(self):
+        summary = {
+            "datasets_configured": 2,
+            "datasets_completed": 2,
+            "dataset_failures": 0,
+            "snapshots_matched": 8,
+            "snapshots_would_delete": 3,
+            "datasets": [],
+        }
+        report = mqtt.build_mqtt_report(
+            arguments(command="dry-run"), "0.0.12", 0, dry_run_report=summary
+        )
+        self.assertEqual(report["dry_run_report"], summary)
+        self.assertTrue(report["dry_run"])
+
     def test_failure_command_diagnostics(self):
         error = app.CommandError(["zfs", "destroy", "tank/data@snap"], 7, "", "dataset is busy")
         report = mqtt.build_mqtt_report(arguments(), "0.0.1", 1, error)
@@ -292,21 +338,35 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(report["title"], "CleanUpInSyncoidSnapshots")
         self.assertEqual(len(report["stderr"]), 4096)
 
-    def test_disabled_and_successful_default_dry_run_do_not_launch_worker(self):
+    def test_shared_notification_gate(self):
+        self.assertFalse(mqtt.should_send_notification(True, False))
+        self.assertTrue(mqtt.should_send_notification(True, True))
+        self.assertTrue(mqtt.should_send_notification(False, False))
+        self.assertTrue(mqtt.should_send_notification(False, True))
+
+    def test_disabled_and_default_success_reports_do_not_launch_worker(self):
         with patch.object(mqtt.subprocess, "run") as launch:
             mqtt.notify_mqtt(None, {"dry_run": False, "status": "success"})
+            mqtt.notify_mqtt(dict(mqtt.DEFAULTS), {"dry_run": False, "status": "success"})
             mqtt.notify_mqtt(dict(mqtt.DEFAULTS), {"dry_run": True, "status": "success"})
         launch.assert_not_called()
 
-    def test_failed_dry_run_publishes_even_when_success_previews_are_disabled(self):
+    def test_failures_publish_for_delete_and_dry_run_when_success_reports_are_disabled(self):
         mqtt_config = dict(mqtt.DEFAULTS, host="localhost", topic="status")
-        report = mqtt.build_mqtt_report(arguments(command="dry-run"), "0.0.8", 1, RuntimeError("failed"))
-        with patch.object(mqtt.subprocess, "run", return_value=Mock(returncode=0)) as launch:
-            mqtt.notify_mqtt(mqtt_config, report)
-        launch.assert_called_once()
+        for command in ("delete", "dry-run"):
+            with self.subTest(command=command), patch.object(
+                mqtt.subprocess, "run", return_value=Mock(returncode=0)
+            ) as launch:
+                report = mqtt.build_mqtt_report(
+                    arguments(command=command), "0.0.12", 1, RuntimeError("failed")
+                )
+                mqtt.notify_mqtt(mqtt_config, report)
+                launch.assert_called_once()
 
     def test_worker_input_and_timeout(self):
-        mqtt_config = dict(mqtt.DEFAULTS, host="localhost", topic="status", username="u", password="secret")
+        mqtt_config = dict(
+            mqtt.DEFAULTS, host="localhost", topic="status", username="u", password="secret", on_success=True
+        )
         report = mqtt.build_mqtt_report(arguments(), "0.0.1", 0)
         with patch.object(mqtt.subprocess, "run", return_value=Mock(returncode=0)) as launch:
             mqtt.notify_mqtt(mqtt_config, report)
@@ -315,12 +375,19 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(json.loads(call.kwargs["input"])["report"], report)
         self.assertEqual(call.kwargs["timeout"], 15)
 
-    def test_dry_run_requires_explicit_publish_opt_in(self):
-        mqtt_config = dict(mqtt.DEFAULTS, publish_dry_run=True)
-        report = mqtt.build_mqtt_report(arguments(command="dry-run"), "0.0.1", 0)
-        with patch.object(mqtt.subprocess, "run", return_value=Mock(returncode=0)) as launch:
-            mqtt.notify_mqtt(mqtt_config, report)
-        self.assertTrue(json.loads(launch.call_args.kwargs["input"])["report"]["dry_run"])
+    def test_success_requires_same_explicit_opt_in_for_delete_and_dry_run(self):
+        mqtt_config = dict(mqtt.DEFAULTS, host="localhost", topic="status", on_success=True)
+        for command in ("delete", "dry-run"):
+            with self.subTest(command=command), patch.object(
+                mqtt.subprocess, "run", return_value=Mock(returncode=0)
+            ) as launch:
+                report = mqtt.build_mqtt_report(arguments(command=command), "0.0.12", 0)
+                mqtt.notify_mqtt(mqtt_config, report)
+                launch.assert_called_once()
+                self.assertEqual(
+                    json.loads(launch.call_args.kwargs["input"])["report"]["dry_run"],
+                    command == "dry-run",
+                )
 
     def test_delivery_failure_is_logged_and_secret_not_echoed(self):
         logger = Mock()
@@ -379,6 +446,9 @@ class BlueprintTests(unittest.TestCase):
             "get('status') in ['success', 'failure']",
             "get('warning', false)",
             "get('dry_run', false)",
+            "get('dry_run_report') is mapping",
+            "snapshots_would_delete",
+            "log_files_would_delete",
             "get('exit_code', 'unknown')",
             "get('error', '')",
             "get('stderr', '')",
@@ -401,9 +471,9 @@ class BlueprintTests(unittest.TestCase):
 
 class LifecycleTests(unittest.TestCase):
     def invoke(self, command="delete", root=True, zfs_error=None, cleanup_error=None,
-               mail_error=None, mqtt_enabled=True, missing_input=False, mail_enabled=None,
-               datasets_text=None, continue_on_missing_dataset=True,
-               continue_on_other_failures=True):
+               mail_error=None, mqtt_enabled=True, mqtt_on_success=False, missing_input=False,
+               mail_enabled=None, mail_on_success=None, datasets_text=None,
+               continue_on_missing_dataset=True, continue_on_other_failures=True):
         """Exercise actual config/CLI/lifecycle with harmless command and logger substitutes."""
         with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
             folder = Path(directory)
@@ -411,8 +481,9 @@ class LifecycleTests(unittest.TestCase):
                 folder,
                 command=command,
                 mqtt_enabled=mqtt_enabled,
+                mqtt_on_success=mqtt_on_success,
                 mail_enabled=bool(mail_error) if mail_enabled is None else mail_enabled,
-                mail_on_success=bool(mail_error),
+                mail_on_success=(bool(mail_error) if mail_on_success is None else mail_on_success),
                 continue_on_missing_dataset=continue_on_missing_dataset,
                 continue_on_other_failures=continue_on_other_failures,
             )
@@ -425,11 +496,14 @@ class LifecycleTests(unittest.TestCase):
             stack.enter_context(patch.object(app, "get_script_log_folder", return_value=directory))
             error_logger = logging.Logger("test-errors")
             error_logger.addHandler(logging.NullHandler())
-            stack.enter_context(patch.object(app, "setup_logger", return_value=(Mock(), error_logger, str(folder / "absent.err"))))
+            self.last_logger = Mock()
+            stack.enter_context(patch.object(app, "setup_logger", return_value=(self.last_logger, error_logger, str(folder / "absent.err"))))
             command_mock = stack.enter_context(
                 patch.object(app, "run_cmd", side_effect=zfs_error, return_value=Mock(stdout=""))
             )
-            stack.enter_context(patch.object(app, "delete_old_files", side_effect=cleanup_error))
+            log_cleanup = stack.enter_context(patch.object(app, "delete_old_files", side_effect=cleanup_error))
+            if cleanup_error is None:
+                log_cleanup.return_value = {"groups_matched": 0, "groups_selected": 0, "files_selected": 0}
             self.last_mail = stack.enter_context(patch.object(app, "MailTo", side_effect=mail_error))
             notify = stack.enter_context(patch.object(app, "notify_mqtt"))
             exception = None
@@ -440,10 +514,86 @@ class LifecycleTests(unittest.TestCase):
             return notify, command_mock, exception
 
     def test_success_final_report(self):
-        notify, command, error = self.invoke()
+        notify, command, error = self.invoke(mqtt_on_success=True)
         self.assertIsNone(error)
         self.assertEqual(command.call_count, 1)
         self.assertEqual(notify.call_args.args[1]["status"], "success")
+
+    def test_dry_run_final_report_contains_zero_destructive_actions(self):
+        notify, _, error = self.invoke(command="dry-run", mqtt_on_success=True)
+        self.assertIsNone(error)
+        report = notify.call_args.args[1]
+        self.assertEqual(report["status"], "success")
+        self.assertTrue(report["dry_run"])
+        self.assertEqual(report["dry_run_report"]["snapshots_would_delete"], 0)
+        self.assertEqual(report["dry_run_report"]["datasets_configured"], 1)
+        self.assertEqual(report["dry_run_report"]["datasets_completed"], 1)
+        self.assertTrue(report["dry_run_report"]["log_retention_evaluated"])
+        self.assertEqual(report["dry_run_report"]["log_files_would_delete"], 0)
+
+    def test_success_mail_is_suppressed_for_delete_and_dry_run_by_default(self):
+        for command in ("delete", "dry-run"):
+            with self.subTest(command=command):
+                _, _, error = self.invoke(
+                    command=command, mail_enabled=True, mail_on_success=False, mqtt_enabled=False
+                )
+                self.assertIsNone(error)
+                self.last_mail.assert_not_called()
+
+    def test_mail_success_suppression_message_is_logged_for_delete_and_dry_run(self):
+        expected = "Success mail report suppressed by mail.on_success=false."
+        for command in ("delete", "dry-run"):
+            with self.subTest(command=command):
+                _, _, error = self.invoke(
+                    command=command, mail_enabled=True, mail_on_success=False, mqtt_enabled=False
+                )
+                self.assertIsNone(error)
+                self.last_logger.info.assert_any_call(expected)
+
+    def test_success_dry_run_suppresses_both_mail_and_mqtt_when_on_success_is_false(self):
+        notify, _, error = self.invoke(
+            command="dry-run",
+            mail_enabled=True,
+            mail_on_success=False,
+            mqtt_enabled=True,
+            mqtt_on_success=False,
+        )
+        self.assertIsNone(error)
+        self.last_mail.assert_not_called()
+        notify.assert_not_called()
+
+    def test_failed_dry_run_still_sends_both_channels_when_on_success_is_false(self):
+        failure = app.CommandError(["zfs", "list"], 2, "", "unavailable")
+        notify, _, error = self.invoke(
+            command="dry-run",
+            zfs_error=failure,
+            mail_enabled=True,
+            mail_on_success=False,
+            mqtt_enabled=True,
+            mqtt_on_success=False,
+        )
+        self.assertIsInstance(error, SystemExit)
+        self.last_mail.assert_called_once()
+        notify.assert_called_once()
+        self.assertEqual(notify.call_args.args[1]["status"], "failure")
+
+    def test_dry_run_success_mail_requires_on_success_and_uses_report_subject(self):
+        _, _, error = self.invoke(
+            command="dry-run", mail_enabled=True, mail_on_success=True, mqtt_enabled=False
+        )
+        self.assertIsNone(error)
+        self.last_mail.assert_called_once()
+        self.assertIn("DRY-RUN SUCCESS", self.last_mail.call_args.kwargs["subject"])
+        self.assertIn("dry-run report", self.last_mail.call_args.kwargs["intro"].lower())
+
+    def test_dry_run_failure_mail_ignores_on_success_setting(self):
+        failure = app.CommandError(["zfs", "list"], 2, "", "unavailable")
+        _, _, error = self.invoke(
+            command="dry-run", zfs_error=failure, mail_enabled=True, mail_on_success=False, mqtt_enabled=False
+        )
+        self.assertIsInstance(error, SystemExit)
+        self.last_mail.assert_called_once()
+        self.assertIn("DRY-RUN FAILED", self.last_mail.call_args.kwargs["subject"])
 
     def test_original_mode_needs_no_mqtt(self):
         notify, command, error = self.invoke(mqtt_enabled=False)
@@ -618,8 +768,24 @@ class LifecycleTests(unittest.TestCase):
         self.assertIsInstance(error, OSError)
         self.assertEqual(notify.call_args.args[1]["status"], "failure")
 
+    def test_dry_run_log_preview_failure_reports_failure_and_failure_mail(self):
+        notify, _, error = self.invoke(
+            command="dry-run",
+            cleanup_error=OSError("log preview failed"),
+            mail_enabled=True,
+            mail_on_success=False,
+            mqtt_enabled=True,
+        )
+        self.assertIsInstance(error, OSError)
+        self.assertEqual(notify.call_args.args[1]["status"], "failure")
+        self.assertFalse(notify.call_args.args[1]["dry_run_report"]["log_retention_evaluated"])
+        self.last_mail.assert_called_once()
+        self.assertIn("DRY-RUN FAILED", self.last_mail.call_args.kwargs["subject"])
+
     def test_mail_warning_is_nonfatal(self):
-        notify, _, error = self.invoke(mail_error=OSError("mail unavailable"))
+        notify, _, error = self.invoke(
+            mail_error=OSError("mail unavailable"), mqtt_on_success=True
+        )
         self.assertIsNone(error)
         report = notify.call_args.args[1]
         self.assertEqual(report["status"], "success")
@@ -688,6 +854,18 @@ class RetentionTests(unittest.TestCase):
         self.assertEqual(self.prune([old, new, ignored], retain_count=1)[1:], [["zfs", "destroy", old]])
         self.assertEqual(len(self.prune([old, new], dry_run=True)), 1)
 
+    def test_dry_run_returns_counts_for_final_report_without_destroy(self):
+        old = "tank/data@syncoid_host_2020-01-01:00:00:00-GMT00:00"
+        new = "tank/data@syncoid_host_2021-01-01:00:00:00-GMT00:00"
+        logger = Mock()
+        with patch.object(app, "run_cmd", return_value=Mock(stdout=f"{old}\n{new}\n")) as command:
+            report = app.delete_syncoid_snapshots(
+                logger, Mock(), "tank/data", ["host"], None, 1, True
+            )
+        self.assertEqual(report, {"dataset": "tank/data", "matched": 2, "selected": 1})
+        self.assertEqual(command.call_count, 1)
+        self.assertTrue(any("Would delete syncoid snapshot" in call.args[0] for call in logger.info.call_args_list))
+
     def test_original_no_retention_behavior_is_preserved(self):
         old = "tank/data@syncoid_host_2020-01-01:00:00:00-GMT00:00"
         self.assertEqual(self.prune([old])[1:], [["zfs", "destroy", old]])
@@ -704,7 +882,9 @@ class RetentionTests(unittest.TestCase):
             unrelated = folder / "other.log"
             for file in old + [newest, unrelated]:
                 file.write_text("test", encoding="utf-8")
-            app.delete_old_files(Mock(), Mock(), directory, "cleanup", None, 1, True)
+            report = app.delete_old_files(Mock(), Mock(), directory, "cleanup", None, 1, True)
+            self.assertEqual(report["groups_selected"], 1)
+            self.assertEqual(report["files_selected"], 2)
             self.assertTrue(all(file.exists() for file in old))
             app.delete_old_files(Mock(), Mock(), directory, "cleanup", None, 1, False)
             self.assertTrue(all(not file.exists() for file in old))
