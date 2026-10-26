@@ -39,7 +39,7 @@ def arguments(**overrides):
 def write_config(directory: Path, *, command="delete", mqtt_enabled=False, mqtt_on_success=False,
                  mail_enabled=False, mail_on_success=False,
                  continue_on_missing_dataset=True, continue_on_other_failures=True,
-                 extra="") -> Path:
+                 report_title="NAS cleanup", extra="") -> Path:
     """Create a complete harmless TOML config plus referenced input files for lifecycle tests."""
     datasets = directory / "datasets.txt"
     hosts = directory / "hosts.txt"
@@ -59,7 +59,7 @@ continue_on_other_failures = {str(continue_on_other_failures).lower()}
 prefix = "cleanup"
 
 [report]
-title = "NAS cleanup"
+title = {json.dumps(report_title)}
 comment = "After replication"
 
 [mail]
@@ -187,14 +187,20 @@ recipient=""
         stdout = io.StringIO()
         with patch.object(sys, "argv", ["cleanup", "--help"]), \
                 patch.object(sys, "stdout", stdout), \
+                patch.object(app, "load_config") as load, \
                 patch.object(app, "run_cleanup") as cleanup, self.assertRaises(SystemExit) as caught:
             app.main()
         self.assertEqual(caught.exception.code, 0)
+        load.assert_not_called()
         help_text = stdout.getvalue()
         self.assertIn("-h, --help", help_text)
         self.assertIn("--version", help_text)
-        self.assertIn("-c, --config CONFIG", help_text)
+        # Python versions format shared short/long metavars differently.
+        self.assertIn("-c", help_text)
+        self.assertIn("--config CONFIG", help_text)
         self.assertIn("Examples:", help_text)
+        for guidance in ("dry-run", "delete", "Both modes require root", "retain_count=0", "on_success=true", "report.title"):
+            self.assertIn(guidance, help_text)
         cleanup.assert_not_called()
 
     def test_cli_version_is_available_without_cleanup(self):
@@ -346,7 +352,7 @@ class ReportTests(unittest.TestCase):
         self.assertTrue(mqtt.should_send_notification(False, True))
 
     def test_disabled_and_default_success_reports_do_not_launch_worker(self):
-        with patch.object(mqtt.subprocess, "run") as launch:
+        with patch.object(mqtt, "_run_publisher") as launch:
             mqtt.notify_mqtt(None, {"dry_run": False, "status": "success"})
             mqtt.notify_mqtt(dict(mqtt.DEFAULTS), {"dry_run": False, "status": "success"})
             mqtt.notify_mqtt(dict(mqtt.DEFAULTS), {"dry_run": True, "status": "success"})
@@ -356,7 +362,7 @@ class ReportTests(unittest.TestCase):
         mqtt_config = dict(mqtt.DEFAULTS, host="localhost", topic="status")
         for command in ("delete", "dry-run"):
             with self.subTest(command=command), patch.object(
-                mqtt.subprocess, "run", return_value=Mock(returncode=0)
+                mqtt, "_run_publisher", return_value=Mock(returncode=0)
             ) as launch:
                 report = mqtt.build_mqtt_report(
                     arguments(command=command), "0.0.14", 1, RuntimeError("failed")
@@ -369,7 +375,7 @@ class ReportTests(unittest.TestCase):
             mqtt.DEFAULTS, host="localhost", topic="status", username="u", password="secret", on_success=True
         )
         report = mqtt.build_mqtt_report(arguments(), "0.0.1", 0)
-        with patch.object(mqtt.subprocess, "run", return_value=Mock(returncode=0)) as launch:
+        with patch.object(mqtt, "_run_publisher", return_value=Mock(returncode=0)) as launch:
             mqtt.notify_mqtt(mqtt_config, report)
         call = launch.call_args
         self.assertNotIn("secret", " ".join(call.args[0]))
@@ -380,7 +386,7 @@ class ReportTests(unittest.TestCase):
         mqtt_config = dict(mqtt.DEFAULTS, host="localhost", topic="status", on_success=True)
         for command in ("delete", "dry-run"):
             with self.subTest(command=command), patch.object(
-                mqtt.subprocess, "run", return_value=Mock(returncode=0)
+                mqtt, "_run_publisher", return_value=Mock(returncode=0)
             ) as launch:
                 report = mqtt.build_mqtt_report(arguments(command=command), "0.0.14", 0)
                 mqtt.notify_mqtt(mqtt_config, report)
@@ -392,16 +398,28 @@ class ReportTests(unittest.TestCase):
 
     def test_delivery_failure_is_logged_and_secret_not_echoed(self):
         logger = Mock()
-        with patch.object(mqtt.subprocess, "run", return_value=Mock(returncode=1, stderr="secret")):
+        with patch.object(mqtt, "_run_publisher", return_value=Mock(returncode=1, stderr="secret")):
             mqtt.notify_mqtt(dict(mqtt.DEFAULTS), {"dry_run": False}, logger)
         self.assertIn("MQTT notification failed", logger.error.call_args.args[0])
         self.assertNotIn("secret", logger.error.call_args.args[0])
 
     def test_timeout_is_nonfatal(self):
         logger = Mock()
-        with patch.object(mqtt.subprocess, "run", side_effect=subprocess.TimeoutExpired("worker", 1)):
+        with patch.object(mqtt, "_run_publisher", side_effect=subprocess.TimeoutExpired("worker", 1)):
             mqtt.notify_mqtt(dict(mqtt.DEFAULTS), {"dry_run": False}, logger)
         self.assertIn("timed out", logger.error.call_args.args[0])
+
+    def test_timeout_kills_publisher_process_group(self):
+        # Simulate the frozen bootloader: the launcher exits while its child keeps
+        # the inherited output pipes open. Timeout must kill the remaining child.
+        script = (
+            "import subprocess, sys; "
+            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])"
+        )
+        started = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            mqtt._run_publisher([sys.executable, "-c", script], input="", timeout=0.5)
+        self.assertLess(time.monotonic() - started, 4)
 
     def test_worker_tls_and_auth(self):
         single = Mock()
@@ -442,7 +460,7 @@ class FrozenBuildTests(unittest.TestCase):
         report = mqtt.build_mqtt_report(arguments(), "0.0.14", 0)
         with patch.object(mqtt.sys, "frozen", True, create=True), \
                 patch.object(mqtt.sys, "executable", "/opt/cleanup/CleanUpInSyncoidSnapshots"), \
-                patch.object(mqtt.subprocess, "run", return_value=Mock(returncode=0)) as launch:
+                patch.object(mqtt, "_run_publisher", return_value=Mock(returncode=0)) as launch:
             mqtt.notify_mqtt(mqtt_config, report)
         call = launch.call_args
         self.assertEqual(call.args[0], ["/opt/cleanup/CleanUpInSyncoidSnapshots"])
@@ -534,7 +552,8 @@ class LifecycleTests(unittest.TestCase):
     def invoke(self, command="delete", root=True, zfs_error=None, cleanup_error=None,
                mail_error=None, mqtt_enabled=True, mqtt_on_success=False, missing_input=False,
                mail_enabled=None, mail_on_success=None, datasets_text=None,
-               continue_on_missing_dataset=True, continue_on_other_failures=True):
+               continue_on_missing_dataset=True, continue_on_other_failures=True,
+               report_title="NAS cleanup", real_mail=False):
         """Exercise actual config/CLI/lifecycle with harmless command and logger substitutes."""
         with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
             folder = Path(directory)
@@ -547,6 +566,7 @@ class LifecycleTests(unittest.TestCase):
                 mail_on_success=(bool(mail_error) if mail_on_success is None else mail_on_success),
                 continue_on_missing_dataset=continue_on_missing_dataset,
                 continue_on_other_failures=continue_on_other_failures,
+                report_title=report_title,
             )
             if datasets_text is not None:
                 (folder / "datasets.txt").write_text(datasets_text, encoding="utf-8")
@@ -565,7 +585,11 @@ class LifecycleTests(unittest.TestCase):
             log_cleanup = stack.enter_context(patch.object(app, "delete_old_files", side_effect=cleanup_error))
             if cleanup_error is None:
                 log_cleanup.return_value = {"groups_matched": 0, "groups_selected": 0, "files_selected": 0}
-            self.last_mail = stack.enter_context(patch.object(app, "MailTo", side_effect=mail_error))
+            self.last_send_mail = stack.enter_context(patch.object(app, "send_mail", return_value=(0, "")))
+            self.last_mail = stack.enter_context(
+                patch.object(app, "MailTo", wraps=app.MailTo) if real_mail else
+                patch.object(app, "MailTo", side_effect=mail_error)
+            )
             notify = stack.enter_context(patch.object(app, "notify_mqtt"))
             exception = None
             try:
@@ -573,6 +597,61 @@ class LifecycleTests(unittest.TestCase):
             except (Exception, SystemExit, KeyboardInterrupt) as exc:
                 exception = exc
             return notify, command_mock, exception
+
+    def test_named_run_reaches_mail_subject_body_and_mqtt(self):
+        for command in ("delete", "dry-run"):
+            for outcome in ("success", "failure", "not-root"):
+                with self.subTest(command=command, outcome=outcome):
+                    failure = app.CommandError(["zfs", "list"], 2, "", "unavailable")
+                    notify, commands, error = self.invoke(
+                        command=command, root=outcome != "not-root",
+                        zfs_error=failure if outcome == "failure" else None,
+                        mail_enabled=True, mail_on_success=True, mqtt_on_success=True,
+                        report_title="NAS nightly cleanup", real_mail=True,
+                    )
+                    if outcome == "success":
+                        self.assertIsNone(error)
+                    else:
+                        self.assertIsInstance(error, SystemExit)
+                    if outcome == "not-root":
+                        commands.assert_not_called()
+                        status_text = "FAILED - not run as root"
+                    else:
+                        mode = "DRY-RUN " if command == "dry-run" else ""
+                        status = "SUCCESS" if outcome == "success" else "FAILED"
+                        attachment = "report/logs" if command == "dry-run" else "logs"
+                        status_text = f"{mode}{status} - {attachment} attached"
+                    self.last_send_mail.assert_called_once()
+                    subject, body, recipient, _attachments = self.last_send_mail.call_args.args
+                    self.assertEqual(subject, f"[NAS nightly cleanup] Syncoid cleanup {status_text}")
+                    self.assertIn("Title: NAS nightly cleanup", body)
+                    self.assertIn("After replication", body)
+                    self.assertEqual(recipient, "nobody@example.invalid")
+                    report = notify.call_args.args[1]
+                    self.assertEqual(report["title"], "NAS nightly cleanup")
+                    self.assertEqual(report["name"], "CleanUpInSyncoidSnapshots")
+                    self.assertEqual(report["job"], "cleanup")
+
+    def test_blank_run_name_preserves_email_subject_and_mqtt_fallback(self):
+        notify, _, error = self.invoke(
+            mail_enabled=True, mail_on_success=True, mqtt_on_success=True,
+            report_title="   ", real_mail=True,
+        )
+        self.assertIsNone(error)
+        self.assertEqual(self.last_send_mail.call_args.args[0], "Syncoid cleanup SUCCESS - logs attached")
+        self.assertEqual(notify.call_args.args[1]["title"], "CleanUpInSyncoidSnapshots")
+
+    def test_multiline_run_name_is_single_line_in_subject_only(self):
+        title = "  NAS\r\nnightly\t cleanup  "
+        notify, _, error = self.invoke(
+            mail_enabled=True, mail_on_success=True, mqtt_on_success=True,
+            report_title=title, real_mail=True,
+        )
+        self.assertIsNone(error)
+        subject, body, *_ = self.last_send_mail.call_args.args
+        self.assertEqual(subject, "[NAS nightly cleanup] Syncoid cleanup SUCCESS - logs attached")
+        self.assertIn("Title: " + title.strip(), body)
+        self.assertEqual(notify.call_args.args[1]["title"], title.strip())
 
     def test_success_final_report(self):
         notify, command, error = self.invoke(mqtt_on_success=True)
@@ -1032,6 +1111,8 @@ class BrokerIntegrationTests(unittest.TestCase):
             timeout=1 if mode == "stall" else 5,
             username="test-user",
             password="test-password",
+            # Exercise real publishing: successful reports are opt-in by policy.
+            on_success=True,
         )
         logger = Mock()
         report = mqtt.build_mqtt_report(arguments(), "0.0.1", 0)
