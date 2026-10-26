@@ -1,148 +1,116 @@
-# Verification — CleanUpInSyncoidSnapshots 0.0.14
+# Verification — CleanUpInSyncoidSnapshots 0.0.16
 
-Verification date: 2026-10-02.
+Date: 2026-10-26. New version: 0.0.15 → 0.0.16.
 
-## Requested behavior
+## Run name behavior
 
-This release hardens the PyInstaller output layout. Every build must start with an empty `dist/` directory and a successful build must finish with exactly one entry:
+Reuse the existing setting, without adding a duplicate configuration option:
 
-```text
-dist/CleanUpInSyncoidSnapshots
+```toml
+[report]
+title = "NAS nightly cleanup"
+comment = "After Syncoid replication"
 ```
 
-No other file, directory, hidden file, metadata file, or copied support file is allowed in `dist/`.
-
-`build-pyinstaller.sh` now:
-
-1. removes the previous build venv, `build/`, and `dist/`;
-2. recreates `dist/` empty;
-3. creates the isolated build environment and installs `requirements-build.txt`;
-4. runs PyInstaller with explicit `--distpath` and `--workpath` locations;
-5. enumerates every direct entry in `dist/` including hidden entries;
-6. fails unless the only entry is the regular executable `CleanUpInSyncoidSnapshots`;
-7. smoke-tests that executable with `--version` and `--help`.
-
-Temporary PyInstaller work files remain under `build/`, not `dist/`.
-
-## Automated tests
-
-Command:
+The configured name is included in MQTT JSON `title`, at the top of the email body, and now at the start of every email subject. For example:
 
 ```text
+[NAS nightly cleanup] Syncoid cleanup SUCCESS - logs attached
+[NAS nightly cleanup] Syncoid cleanup FAILED - logs attached
+[NAS nightly cleanup] Syncoid cleanup DRY-RUN SUCCESS - report/logs attached
+[NAS nightly cleanup] Syncoid cleanup DRY-RUN FAILED - report/logs attached
+[NAS nightly cleanup] Syncoid cleanup FAILED - not run as root
+```
+
+The shared `MailTo` function adds the prefix exactly once. It collapses title whitespace for a single-line subject; the email body and MQTT keep the existing stripped title text. Blank titles preserve existing email subjects and the MQTT application-name fallback. MQTT `name` remains the fixed application identifier and `job` remains the logging prefix, preserving Home Assistant's filtering contract.
+
+Notification enablement and success opt-in still control delivery. Configuring a title does not enable mail/MQTT or success notifications. Log filenames, MQTT topics, selection, retention, dry-run protection and root enforcement are unchanged.
+
+## Changes and preserved files
+
+- Increment application/version references to 0.0.16 and rebuild the standalone binary.
+- Extend `MailTo` with the shared subject prefix; correct the mail-header docstring and add `report.title` guidance to `--help`.
+- Reuse existing report/config modules. No MQTT/config-loader implementation or schema changes.
+- Extend the existing test fixtures with configurable titles and real `MailTo` execution while mocking the external mail boundary. Add three meaningful regressions covering named lifecycle paths, blank fallback and multiline subject handling.
+- Update README for current behavior, config example comments, every-function/command map and VERSIONING history.
+- Preserve DISCLAIMER.md and its exact owner-supplied text; retain all original project files and build metadata.
+- Refresh this verification report and PACKAGE_MANIFEST.json.
+
+The complete project was inspected in 0.0.15 and relevant paths were reread before this change. AST comparison against 0.0.15 confirms all main-module functions/classes are unchanged except `main` (version/help), `MailTo` (subject) and the `build_backup_mail_header` docstring. Config loader, MQTT module, Home Assistant blueprint, build helper/spec, requirements and disclaimer remain byte-for-byte unchanged from 0.0.15. The existing publisher process-group timeout fix is retained.
+
+## Automated verification
+
+| Check | Result |
+| --- | --- |
+| Full suite on Python 3.14 | 73 passed, 0 failed, 0 skipped |
+| Full suite on Python 3.12 | 73 passed, 0 failed, 0 skipped |
+| Named lifecycle regressions | Delete/dry-run success, checked-command failure and root rejection all carry matching subject/body/MQTT names |
+| Blank and multiline names | Legacy blank fallback retained; CR/LF/tab whitespace normalized only in subjects |
+| Frozen MQTT worker | All 3 localhost integration tests pass: QoS 0/1/2, rejection and process-group timeout |
+| Actual frozen application | Configured name reached a captured local mail subject/body and real localhost MQTT report during non-root rejection; exit 1 retained, no ZFS calls |
+| Python compile | App, config loader, MQTT module, tests and PyInstaller spec compile |
+| Shell syntax | `bash -n build-pyinstaller.sh` passes |
+| Documentation coverage | Every Python function/method/nested helper appears in commented_code_map.md |
+| Config example | All supported settings represented; dry-run and disabled notifications remain the defaults |
+
+Full-suite command from the project directory:
+
+```bash
 python3 -B -m unittest discover -s tests -v
 ```
 
-Result:
+ZFS and external mail delivery were mocked. Real MQTT protocol checks used only an ephemeral localhost broker fixture. The actual frozen app test captured a fake local `mail` command and relied on verified non-root rejection before dataset input or ZFS processing.
+
+## CLI and standalone executable
+
+The actual unchanged build helper recreated `dist/` and built the final Linux x86-64 executable using Python 3.12.14 and the declared build dependencies. It verified that `dist/` contains exactly one regular executable and ran its help/version smoke checks.
+
+Both source and frozen modes pass `-h`, `--help`, `--version`, missing-argument, unsupported/obsolete-flag, missing-config-via-either-alias, and malformed-TOML checks. Help includes the run-name setting. Version output is 0.0.16. Help/version/invalid-config checks create no runtime logs. Fresh extraction of the final ZIP passes the same checks.
+
+Executable SHA-256:
 
 ```text
-Ran 69 tests
-OK (skipped=3)
+e4b450b7ad507dde5d10a733de620dfd80867fe32eb9677ec55f40d2fb9647b7
 ```
 
-That is **66 passed, 3 skipped, 0 failed**.
+## Archive verification
 
-The three skipped tests are the optional real-Paho MQTT broker/loopback tests because `paho-mqtt` is not installed in this verification environment.
+Original input: `CleanUpInSyncoidSnapshots-main.zip`.
 
-The PyInstaller regression now checks that the build helper:
-
-- deletes the old `dist/` and recreates it;
-- uses explicit PyInstaller dist/work paths;
-- expects `dist/CleanUpInSyncoidSnapshots`;
-- counts all top-level `dist/` entries;
-- requires exactly one entry;
-- requires that entry to be the expected regular executable;
-- retains the frozen `--version` and `--help` smoke checks;
-- creates no `bin/` copy.
-
-## Build-output guard simulation
-
-The build helper was exercised with a local fake PyInstaller runner so the shell lifecycle and final-output guard could be tested without downloading external packages.
-
-Clean-output case:
+Original SHA-256:
 
 ```text
-CleanUpInSyncoidSnapshots 0.0.14
-Built: .../dist/CleanUpInSyncoidSnapshots
-Verified: dist/ contains only CleanUpInSyncoidSnapshots
+6f2b272f947e0536c5bc6f5c981c915b1eb76d715bddd50050aaeb89327b3c8d
 ```
 
-The resulting simulated `dist/` manifest contained exactly:
+Final archive: `CleanUpInSyncoidSnapshots-0.0.16.zip`.
+
+- Original files: 21. Final files: 22. Missing original paths: 0.
+- Against the original input: 9 intentionally modified files, 12 byte-for-byte unchanged files, and PACKAGE_MANIFEST.json added.
+- Against 0.0.15: all 22 relative file paths retained; 9 changed files including regenerated PACKAGE_MANIFEST.json, 13 unchanged.
+- Executable permissions retained on app script, build helper and standalone binary.
+- ZIP CRC, file paths, sizes, modes and hashes verified against the prepared project.
+- Fresh extraction matches every manifest hash and compiles successfully.
+- No Python bytecode/cache, build intermediates, virtualenvs, runtime logs or temporary files included.
+
+Changed since 0.0.15:
 
 ```text
-CleanUpInSyncoidSnapshots
+CleanUpInSyncoidSnapshots.py
+PACKAGE_MANIFEST.json
+README.md
+VERIFICATION.md
+VERSIONING.md
+commented_code_map.md
+config-example.toml
+dist/CleanUpInSyncoidSnapshots
+tests/test_project.py
 ```
 
-Extra-output case: the fake PyInstaller runner additionally created `dist/extra.txt`. The build helper correctly exited with status 1 and reported:
+PACKAGE_MANIFEST.json records both baseline comparisons and file hashes. It excludes its own content hash to avoid circular metadata. SHA256SUMS-0.0.16.txt covers the final ZIP and separately supplied verification/manifest files. The 0.0.15 artifacts remain available unchanged.
 
-```text
-ERROR: dist/ must contain exactly one executable: .../dist/CleanUpInSyncoidSnapshots
-Current dist/ contents:
-  extra.txt
-  CleanUpInSyncoidSnapshots
-```
+## Limits
 
-This verifies the new shell-level single-file guard. It is not a substitute for a real PyInstaller freeze.
+No real ZFS listing/destruction, production email delivery, production MQTT credentials/ACLs/TLS handshake, or running Home Assistant instance was tested. Frozen compatibility on other Linux systems/architectures and source compatibility under Python 3.10 were not tested. Existing source tests cover config/auth/TLS wiring using mocks; actual MQTT protocol delivery was checked locally.
 
-## Compile, shell, and CLI checks
-
-The following compile successfully with `python3 -m py_compile`:
-
-- `CleanUpInSyncoidSnapshots.py`
-- `config_loader.py`
-- `mqtt_notifications.py`
-- `tests/test_project.py`
-- `CleanUpInSyncoidSnapshots.spec` (syntax only)
-
-`bash -n build-pyinstaller.sh` succeeds.
-
-`python3 CleanUpInSyncoidSnapshots.py --version` returns:
-
-```text
-CleanUpInSyncoidSnapshots.py 0.0.14
-```
-
-`python3 CleanUpInSyncoidSnapshots.py --help` exits successfully and documents the public `-h/--help`, `--version`, and `-c/--config` options.
-
-## Real PyInstaller limitation
-
-A real one-file executable was not produced in this verification environment because PyInstaller, Paho MQTT, and Tomli are not installed here and this environment cannot download them from the external Python package index.
-
-The actual build should therefore be run on the target/compatible Linux build system with:
-
-```text
-./build-pyinstaller.sh
-```
-
-On that system the script itself will reject any successful-looking build that leaves anything other than the single executable in `dist/`.
-
-## Documentation/config checks
-
-- `README.md` documents the empty-before-build and executable-only-after-build `dist/` rule.
-- `VERSIONING.md` records the 0.0.14 release.
-- `commented_code_map.md` documents the strict build command and regression behavior.
-- `config-example.toml` is unchanged because no runtime configuration changed.
-- `DISCLAIMER.md` is unchanged.
-
-## 0.0.13-to-0.0.14 manifest comparison
-
-Both releases contain the same **20 project files**. No project file was added or removed.
-
-Intentionally changed project files:
-
-- `CleanUpInSyncoidSnapshots.py`
-- `README.md`
-- `VERIFICATION.md`
-- `VERSIONING.md`
-- `build-pyinstaller.sh`
-- `commented_code_map.md`
-- `tests/test_project.py`
-
-All other project files remain byte-for-byte unchanged from 0.0.13.
-
-`CleanUpInSyncoidSnapshots.py` and `build-pyinstaller.sh` retain executable mode `0755` in the prepared source tree.
-
-## Safety and limitations
-
-No snapshot selection, ZFS destruction, dry-run, retention, dataset continuation, configuration, mail, MQTT, Home Assistant, or notification-policy behavior changed in 0.0.14.
-
-No real ZFS destruction, production mail delivery, production MQTT broker connection, Home Assistant runtime test, or real PyInstaller frozen-runtime test was performed.
+The app has no run lock; concurrent cleanup runs require external coordination. Verification is not a professional audit.

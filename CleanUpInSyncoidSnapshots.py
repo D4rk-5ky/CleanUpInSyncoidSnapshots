@@ -12,7 +12,7 @@ from config_loader import load_config, parse_older_than
 from mqtt_notifications import build_mqtt_report, notify_mqtt, publish_worker, should_send_notification
 
 
-__version__ = "0.0.14"
+__version__ = "0.0.16"
 
 
 class ReportWarningHandler(logging.Handler):
@@ -285,8 +285,8 @@ def build_backup_mail_header(backup_title: str = "", backup_comment: str = "") -
     """
     Build the optional text block that is written at the very top of notification emails.
 
-    The email subject still stays as SUCCESS/FAILED. These values are only written
-    into the body of the mail.
+    The title also names the run in the email subject; the full title/comment
+    remain in the body, while the existing SUCCESS/FAILED status is preserved.
     """
     backup_title = (backup_title or "").strip()
     backup_comment = (backup_comment or "").strip()
@@ -339,6 +339,12 @@ def MailTo(
 
     if not body.strip():
         body = "No log content was found. Check the script output on the host.\n"
+
+    # Reuse report.title as the run name across MQTT, mail body and subject.
+    # TOML permits multiline titles for the body; subjects must remain one line.
+    run_name = " ".join((backup_title or "").split())
+    if run_name:
+        subject = f"[{run_name}] {subject}"
 
     mail_exit_code, stderr_output = send_mail(subject, body, recipient, attachment_files)
     WasMailSent(logger, error_logger, mail_exit_code, stderr_output)
@@ -607,9 +613,19 @@ def main():
     # which TOML file to load. Standard -h/--help is available for discoverability;
     # all cleanup, retention, mail, report, logging, and MQTT behavior lives in TOML.
     parser = argparse.ArgumentParser(
+        # Keep help/version naming tied to the invoked app on Python 3.14+ too.
+        prog=os.path.basename(sys.argv[0]),
         description="Delete matching syncoid ZFS snapshots using one TOML configuration file.",
         usage="%(prog)s -c CONFIG\n       %(prog)s --help\n       %(prog)s --version",
         epilog=(
+            "Modes (set cleanup.command in TOML):\n"
+            "  dry-run  Preview snapshot and old-log candidates; create local logs.\n"
+            "  delete   Destroy selected snapshots and prune eligible old logs.\n"
+            "Both modes require root. Enabled failure notifications can be sent in either mode;\n"
+            "success notifications require the channel's on_success=true.\n"
+            "Review a dry-run first. No age cutoff with retain_count=0 selects every matching snapshot.\n"
+            "Relative input/certificate paths are resolved beside the TOML file.\n"
+            "Run name: set report.title to label MQTT reports and email subjects.\n\n"
             "Examples:\n"
             "  %(prog)s -c config.toml\n"
             "  %(prog)s --config /etc/cleanup-syncoid/config.toml"

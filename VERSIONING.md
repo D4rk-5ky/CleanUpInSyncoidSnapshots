@@ -8,8 +8,41 @@ Record every release's code and documentation changes here. Keep README.md about
 current usage and commented_code_map.md about current implementation.
 The application version is `__version__` in CleanUpInSyncoidSnapshots.py.
 
-The supplied archive had no version identifier or version history. It is the
+The initial historical archive had no version identifier or version history. It is the
 unversioned baseline; 0.0.1 is the first numbered release, with no invented prior releases.
+
+## 0.0.16 — 2026-10-26
+
+- Increment from 0.0.15 to 0.0.16.
+- Reuse the existing `[report].title` as the configurable run name. It already travels in MQTT JSON `title` and the email body; include it as `[run name]` at the start of every subject through the shared `MailTo` function.
+- Preserve SUCCESS/FAILED and DRY-RUN status text, including root-check failure subjects. Collapse title whitespace in subjects to keep multiline TOML titles on one line; retain the full title/comment in email bodies. Blank titles preserve the existing subject.
+- Keep MQTT `name` fixed as the application identifier and `job` as the log prefix so Home Assistant filtering and existing consumers remain compatible. No duplicate configuration option, new public flag or MQTT schema change is needed.
+- Add end-to-end notification regressions for named delete/dry-run success/failure and root rejection, plus blank/multiline title cases. ZFS and mail are mocked.
+- Update current-use README, complete config comments, `--help` guidance and function/command map with the run-name setting and examples. Preserve the owner's disclaimer.
+- Rebuild the standalone executable, refresh verification evidence and regenerate the clean package manifest against both the preceding release and the original input archive.
+
+Cleanup selection, retention, root enforcement, dry-run protection, continuation/failure behavior, notification enablement/success gating, MQTT transport, publisher process-group timeout, log naming and topics are unchanged.
+
+See `VERIFICATION.md` for checks and limitations.
+
+## 0.0.15 — 2026-10-26
+
+- Increment the application/package version from 0.0.14 to 0.0.15; retain the patch-99 rollover rule.
+- Set argparse's program name explicitly from the invoked filename. Python 3.14 otherwise uses the surrounding module launcher in embedded/test invocations, breaking CLI-name/version expectations.
+- Expand `--help` with TOML `dry-run`/`delete` meanings, root enforcement, notification opt-in, config-relative paths, and the existing no-age/zero-retention destructive selection behavior. No public operational flag is added.
+- Fix frozen publisher timeout cleanup: replace the direct `subprocess.run` call with a shared `_run_publisher` helper that starts an isolated Linux process session and kills the entire publisher process group on timeout or interruption, then reaps the launcher. This prevents a PyInstaller child from remaining connected after its launcher was killed. Secrets stay on stdin, timeout failures stay nonfatal, and cleanup exit policy is unchanged.
+- Add a regression simulating an exited launcher with a child holding output pipes, and retarget publisher-wrapper mocks to the new helper.
+- Correct `BrokerIntegrationTests.exchange` to set `on_success=True` for its successful report. The fixture previously requested a success report under failure-only policy, so real-Paho tests timed out without connecting. Production notification gating is unchanged.
+- Strengthen the existing help regression to check mode/safety guidance and prove configuration is not loaded; accept the equivalent short/long metavar formatting used by different supported Python versions.
+- Update README for current use, exit/report semantics, dry-run side effects and early-report limitations, concurrent-run coordination, and the complete owner-supplied disclaimer. Preserve `DISCLAIMER.md` byte-for-byte.
+- Refresh config example comments with version/help usage, dry-run side effects, no-age/zero-retention behavior and the existing zero-duration distinction. All available options remain represented; the schema/defaults are unchanged.
+- Update the function/command map, including build-shell/spec operations and test-fixture intent. Preserve the original uppercase `VERSIONING.md` as the single version history.
+- Rebuild the included `dist/CleanUpInSyncoidSnapshots` executable from this release's sources. Preserve every original relative file path, including build metadata, repository metadata, tests, input examples and Home Assistant blueprint.
+- Replace verification evidence with this release's actual checks and limitations; add `PACKAGE_MANIFEST.json` with original-relative classifications and file hashes. Package only project files and the final executable, excluding caches, bytecode, build intermediates, virtualenvs and temporary files.
+
+Snapshot selection, destruction, retention, dry-run protection, root guard, continuation/final-failure rules, mail/MQTT enablement, non-retained MQTT, publisher timeout and Home Assistant behavior remain intact. Production changes cover the version, public parser naming/help, and enforcement of the existing publisher timeout across frozen worker descendants.
+
+See `VERIFICATION.md` for baseline findings, final results, frozen executable checks and live-system limitations.
 
 ## 0.0.14 — 2026-10-02
 

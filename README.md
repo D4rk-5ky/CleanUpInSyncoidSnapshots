@@ -2,7 +2,7 @@
 
 CleanUpInSyncoidSnapshots removes matching Syncoid-created ZFS snapshots, can preview the exact deletion set first, produces a final dry-run report, prunes its own log groups with the same retention settings, and can optionally send email and MQTT JSON status reports.
 
-Current application version: **0.0.14**.
+Current application version: **0.0.16**.
 
 ## Requirements
 
@@ -35,6 +35,8 @@ A one-file Linux executable can be built with the included PyInstaller release f
 ```bash
 ./build-pyinstaller.sh
 ```
+
+Optional environment overrides are `PYTHON_BIN` (default `python3`) and `VENV_DIR` (default `.venv-build`). `VENV_DIR` must point to a disposable build environment: the helper deletes it before building.
 
 The build script recreates a clean `.venv-build/`, installs `requirements-build.txt`, removes old `build/` and `dist/` output, recreates `dist/` empty, and runs the included `CleanUpInSyncoidSnapshots.spec`. The final executable is left directly in:
 
@@ -69,7 +71,7 @@ The example defaults to `command = "dry-run"`, with both mail and MQTT disabled.
 | `datasets_file` | Required | File containing one exact local ZFS dataset per non-empty line. Dataset-level ZFS failures always make the final run fail; the two continuation options below decide whether later configured datasets are still attempted. |
 | `syncoid_hosts_file` | Required | File containing Syncoid hostnames, one per line. Blank lines and whole-line `#` comments are ignored. |
 | `older_than` | `""` | Optional age cutoff such as `7d`, `2w`, or `3m`. `m` means 30 days. Empty disables the age cutoff. |
-| `retain_count` | `0` | Protect the newest N matching snapshots per hostname/dataset and the newest N log timestamp groups. Negative values are normalized to 0 to preserve earlier behavior. |
+| `retain_count` | `0` | Protect the newest N matching snapshots per hostname/dataset and the newest N log timestamp groups. Negative values are normalized to 0. |
 | `continue_on_missing_dataset` | `true` | When ZFS explicitly reports `dataset does not exist`, record the failure and continue with the next configured dataset. `false` stops immediately. The final result is failure either way. |
 | `continue_on_other_failures` | `true` | When another checked ZFS `list` or `destroy` command fails for a dataset, record the failure and continue with the next configured dataset. `false` stops immediately. Global/config/root/input failures are not made recoverable. |
 
@@ -85,8 +87,18 @@ The application always creates and uses a `logs/` directory beside the running a
 
 | Setting | Required/default | Meaning |
 | --- | --- | --- |
-| `title` | `""` | Optional title written into email and used as MQTT report title. MQTT falls back to `CleanUpInSyncoidSnapshots` when blank. |
+| `title` | `""` | Optional run name. Sent in MQTT JSON `title`, shown at the top of the email body, and prefixed as `[run name]` to every email subject. Blank leaves email subjects unchanged; MQTT falls back to `CleanUpInSyncoidSnapshots`. Multiline whitespace is collapsed in the subject only. |
 | `comment` | `""` | Optional free-form comment included in email and MQTT reports. |
+
+Name a run in its TOML configuration:
+
+```toml
+[report]
+title = "NAS nightly cleanup"
+comment = "After Syncoid replication"
+```
+
+For this example, MQTT includes `"title": "NAS nightly cleanup"`, and email subjects include `[NAS nightly cleanup] Syncoid cleanup SUCCESS - logs attached` or the corresponding `FAILED` / `DRY-RUN` status. The run name is also included on root-check failure emails. Use a different title in each job's configuration. It does not change log filenames, MQTT topics or cleanup selection. MQTT `name` stays `CleanUpInSyncoidSnapshots` for application identification, and `job` stays the log prefix. Existing mail/MQTT enablement and `on_success` rules still decide which reports are sent.
 
 ### `[mail]`
 
@@ -121,11 +133,11 @@ MQTT is optional and disabled unless `enabled = true`.
 | `keyfile` | `""` | Optional matching private key. Requires `certfile` and `tls = true`. |
 | `on_success` | `false` | `false` publishes MQTT only on failure; `true` also publishes after success. A successful dry-run follows the same rule as a successful delete run. |
 
-Certificate paths may be absolute or relative to the TOML file. MQTT messages are always published with `retain = false`. Credentials and report data are sent to the isolated publisher through standard input rather than command-line arguments. MQTT delivery failures are nonfatal and do not change the cleanup result.
+Certificate paths may be absolute or relative to the TOML file. MQTT messages are always published with `retain = false`. Credentials and report data are sent to the isolated publisher through standard input rather than command-line arguments. MQTT delivery failures are nonfatal and do not change the cleanup result. A timed-out publisher is terminated as an isolated Linux process group, including frozen bootloader child processes, so it cannot continue publishing after the timeout.
 
 ### Success/failure notification rule
 
-Email and MQTT intentionally use the same rule. `enabled` decides whether that channel is active; `on_success` decides whether successful runs are also reported. A dry-run uses the same success/failure decision as a normal delete run. The application now applies this decision at the lifecycle boundary before invoking either success-notification path; MQTT also keeps a second defensive check inside the publisher wrapper.
+Email and MQTT intentionally use the same rule. `enabled` decides whether that channel is active; `on_success` decides whether successful runs are also reported. A dry-run uses the same success/failure decision as a normal delete run. The application applies this decision at the lifecycle boundary before invoking either success-notification path; MQTT also keeps a second defensive check inside the publisher wrapper.
 
 | Channel enabled | `on_success` | Run result | Notification |
 | --- | --- | --- | --- |
@@ -160,7 +172,7 @@ Hostname matching is exact and case-sensitive. Blank lines and whole-line `#` co
 
 ## Running the application
 
-The application has one operational CLI setting: which TOML configuration file to load. Standard help and version output are also available.
+The application has one operational CLI setting: which TOML configuration file to load. Standard help and version output are also available. Help explains both TOML modes, the root requirement, notification policy, config-relative paths, and the no-age/zero-retention deletion case.
 
 | Flag | Required | What it does |
 | --- | --- | --- |
@@ -241,7 +253,7 @@ Snapshot names must match:
 <dataset>@syncoid_<hostname>_YYYY-MM-DD:HH:MM:SS-GMT[+/-]HH:MM
 ```
 
-A positive timezone offset without an explicit `+` is also accepted, matching the earlier implementation. Nonmatching snapshots are ignored. A matching snapshot with a malformed timestamp is logged and skipped.
+A positive timezone offset without an explicit `+` is also accepted. Nonmatching snapshots are ignored. A matching snapshot with a malformed timestamp is logged and skipped.
 
 Snapshots are grouped by configured hostname within each dataset and sorted newest-first by the timestamp embedded in the snapshot name, normalized to UTC.
 
@@ -249,7 +261,7 @@ Snapshots are grouped by configured hostname within each dataset and sorted newe
 - With `older_than` configured, only unprotected snapshots strictly older than the cutoff are candidates.
 - With no `older_than`, every unprotected matching snapshot is a candidate.
 - Therefore, `older_than = ""` together with `retain_count = 0` means every matching snapshot is selected for deletion in `delete` mode. Use `dry-run` first.
-- Existing behavior for `0d`, `0w`, and `0m` is preserved: for snapshot pruning, a zero-duration value acts like no cutoff because a zero `timedelta` is falsey in the existing cleanup code.
+- For `0d`, `0w`, and `0m`: for snapshot pruning, a zero-duration value acts like no cutoff because a zero `timedelta` is falsey in the existing cleanup code.
 
 Each snapshot is destroyed individually with:
 
@@ -263,11 +275,20 @@ No recursive or force flags are added. Any checked `zfs list` or `zfs destroy` f
 
 `.log` and `.err` files sharing the same timestamp are treated as one log group. Successful `delete` runs prune eligible groups after snapshot processing. `dry-run` never removes old log groups, but it previews them before the final dry-run report is written so the report and optional success notifications include the old-log candidate counts.
 
-Log retention uses the same `older_than` and `retain_count` settings as snapshot retention. With both disabled, log pruning does nothing. Log timestamps use local time. The current run's empty `.err` file is removed at the end.
+Log retention uses the same `older_than` and `retain_count` settings as snapshot retention. With both disabled, log pruning does nothing. Log timestamps use local time. The current run's empty `.err` file is removed at the end, including during dry-run. Dry-run creates the log directory/files and can send enabled notifications; it previews snapshot and old-log deletions.
 
 ## Root requirement
 
 Actual cleanup and dry-run execution both require root. The guard runs before reading dataset/hostname files or issuing ZFS commands. If root is missing, the application logs the error, optionally mails it, optionally reports it through MQTT, and exits with code 1.
+
+## Exit status and troubleshooting
+
+- `0`: cleanup or preview completed. Notification delivery errors can still appear in logs without changing this result.
+- `1`: cleanup failed, including any recorded dataset failure even when continuation was enabled.
+- `2`: invalid CLI arguments or configuration rejected before cleanup starts.
+- An interrupted run is reported to MQTT with `exit_code = 130`. The process retains Python's normal interrupt termination behavior.
+
+Inspect `logs/` beside the source script or installed executable for diagnostics. A dry-run is a point-in-time preview; snapshot changes between runs can change the selected set. Coordinate scheduled cleanup jobs so they do not overlap: the application has no run lock. Uncaught runtime exceptions can include a traceback.
 
 ## Dataset failure continuation
 
@@ -289,7 +310,7 @@ When one or more dataset failures were continued, the application combines them 
 
 ## Dry-run report
 
-Every dry-run writes a final `DRY-RUN REPORT` to the normal log after snapshot selection. On a successful dry-run, old-log retention is previewed first so those counts are included too. The report contains:
+After entering snapshot processing, a dry-run writes a final `DRY-RUN REPORT` to the normal log. Configuration, log-setup, or root-check failures occur before that report is initialized. On a successful dry-run, old-log retention is previewed first so those counts are included too. The report contains:
 
 - configured dataset count;
 - successfully completed dataset count;
@@ -300,7 +321,7 @@ Every dry-run writes a final `DRY-RUN REPORT` to the normal log after snapshot s
 - old log groups and log files that **WOULD** be deleted when the dry-run completed successfully;
 - an explicit statement that zero snapshots were actually destroyed and no old logs were deleted.
 
-The final dry-run report is always written locally. A successful dry-run email includes it only when `mail.enabled = true` and `mail.on_success = true`. A successful MQTT dry-run report is published only when `mqtt.enabled = true` and `mqtt.on_success = true`; otherwise no success MQTT notifier is invoked. Failed dry-runs still produce the available partial snapshot report and still notify through each enabled channel regardless of `on_success`; old-log retention is marked as not evaluated because failed runs do not proceed to log retention. If the old-log preview itself fails, the dry-run becomes a failed run and follows the normal failure-notification rule.
+The initialized dry-run report is written locally at finalization. A successful dry-run email includes it only when `mail.enabled = true` and `mail.on_success = true`. A successful MQTT dry-run report is published only when `mqtt.enabled = true` and `mqtt.on_success = true`; otherwise no success MQTT notifier is invoked. Failed dry-runs still produce the available partial snapshot report and still notify through each enabled channel regardless of `on_success`; old-log retention is marked as not evaluated because failed runs do not proceed to log retention. If the old-log preview itself fails, the dry-run becomes a failed run and follows the normal failure-notification rule.
 
 ## MQTT report format
 
@@ -319,7 +340,7 @@ A final MQTT message is JSON with these fields:
   "command": "delete",
   "dry_run": false,
   "comment": "",
-  "version": "0.0.14",
+  "version": "0.0.16",
   "timestamp": "2026-09-15T12:00:00+00:00"
 }
 ```
@@ -371,9 +392,36 @@ The blueprint can independently show clean success, success-with-warning, failur
 - `commented_code_map.md` - current function and command map.
 - `VERSIONING.md` - release-by-release change record.
 - `VERIFICATION.md` - verification evidence and limits for this release.
+- `PACKAGE_MANIFEST.json` - original-file comparison and release file checksums.
 - `DISCLAIMER.md` - safety/liability notice.
 - `.gitignore` - excludes local runtime configs, generated logs, Python caches, virtual environments, and build outputs while keeping the shipped example tracked.
 
 ## Safety notes
 
 This application can destroy ZFS snapshots. Review the included [DISCLAIMER.md](DISCLAIMER.md), keep independent backups, use `dry-run` before `delete`, and verify the configured dataset, hostname, retention, and path values before running against important data.
+
+## ⚠️ Disclaimer / Liability
+
+**Use this script at your own risk.**
+
+The author takes **no responsibility or liability** for any data loss, service disruption, misconfiguration, service outage, missed backups, credential exposure, or other damage that may occur from using this script.
+
+Before running it in production, you **must**:
+
+- Read the entire source code
+- Understand exactly what it does (and what it does *not* do)
+- Review and adapt it to your own environment
+- Test it carefully in a non‑production setup
+
+By using this script, **you accept full responsibility** for its effects.
+
+⚠️ AI-assisted / vibe-coded experimental software. Use at your own risk.
+
+## Disclaimer
+
+This project is AI-assisted / vibe-coded software created as a hobby project. It has not been professionally audited and may contain bugs, unsafe behavior, data-loss issues, security problems, or incorrect assumptions.
+
+You are responsible for reviewing the code, testing it in a safe environment, making backups, and understanding what it does before using it on real data. The author is not responsible for damage, data loss, broken systems, security issues, or other problems caused by using this software.
+
+---
+

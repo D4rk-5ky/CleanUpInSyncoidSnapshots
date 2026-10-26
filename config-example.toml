@@ -2,7 +2,10 @@
 # Copy this file to e.g. config.toml, edit it, and run with either equivalent flag:
 #   sudo python3 CleanUpInSyncoidSnapshots.py -c config.toml
 #   sudo python3 CleanUpInSyncoidSnapshots.py --config config.toml
-# Use -h/--help to show the CLI help without starting cleanup.
+# Use -h/--help to show all public flags and mode/safety guidance.
+# Use --version to print the application version without loading configuration.
+# Both execution modes require root and create local logs. Dry-run can also send
+# enabled notifications and removes the current empty .err file at finalization.
 #
 # Relative filesystem paths in this file are resolved relative to this TOML file.
 
@@ -22,6 +25,8 @@ syncoid_hosts_file = "hostnames-example"
 
 # Optional age cutoff for snapshots and log groups. Use Nd, Nw, or Nm, where m is
 # treated as 30 days. Set to an empty string to disable the age cutoff.
+# WARNING: empty age + retain_count=0 selects ALL matching snapshots.
+# A zero age (0d/0w/0m) acts as no cutoff for snapshots; logs use a cutoff of now.
 older_than = "7d"
 
 # Number of newest matching snapshots to protect per hostname/dataset, and newest
@@ -44,7 +49,10 @@ continue_on_other_failures = true
 prefix = "CleanUpInSyncoidSnapshots"
 
 [report]
-# Optional human-readable title used at the top of email and as MQTT report title.
+# Optional run name, included as MQTT JSON "title", at the top of email bodies,
+# and as [run name] at the start of every email subject (success/failure/dry-run).
+# Empty leaves email subjects unchanged; MQTT then uses the application name.
+# Multiline title whitespace is collapsed to spaces in the email subject only.
 title = "Syncoid snapshot cleanup"
 
 # Optional free-form comment included in email and MQTT status reports.
