@@ -4,6 +4,7 @@ import datetime
 import json
 import math
 import os
+import signal
 from pathlib import Path
 import ssl
 import subprocess
@@ -105,6 +106,36 @@ def build_mqtt_report(args, version, exit_code, error=None, warning=False, dry_r
     return report
 
 
+def _run_publisher(command, *, input, timeout, env=None):
+    """Bound a Linux publisher session, including PyInstaller's bootloader child.
+
+    Killing only the direct launcher on timeout can leave the frozen Python child
+    connected to the broker. A new session isolates the publisher's process group
+    so timeout/interruption cleanup cannot signal the calling cleanup process.
+    """
+    with subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        env=env,
+        start_new_session=True,
+    ) as worker:
+        try:
+            stdout, stderr = worker.communicate(input=input, timeout=timeout)
+        except BaseException:
+            # Include the bootloader child even if its direct parent just exited.
+            try:
+                os.killpg(worker.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            worker.communicate()
+            raise
+        return subprocess.CompletedProcess(command, worker.returncode, stdout, stderr)
+
+
 def notify_mqtt(config, report, error_logger=None):
     """Send one final report without altering cleanup's exit status on delivery failure."""
     if config is None:
@@ -123,14 +154,10 @@ def notify_mqtt(config, report, error_logger=None):
             command = [sys.executable, "-B", os.path.abspath(__file__), "--publish"]
             worker_env = None
 
-        result = subprocess.run(
+        result = _run_publisher(
             command,
             input=json.dumps({"config": config, "report": report}),
-            text=True,
-            encoding="utf-8",
-            capture_output=True,
             timeout=config["timeout"],
-            check=False,
             env=worker_env,
         )
         if result.returncode:

@@ -1,4 +1,4 @@
-# Commented code map — CleanUpInSyncoidSnapshots 0.0.14
+# Commented code map — CleanUpInSyncoidSnapshots 0.0.16
 
 This file explains the current implementation. It is not a version history; release changes belong in `VERSIONING.md`.
 
@@ -26,13 +26,13 @@ This file explains the current implementation. It is not a version history; rele
 | `print_separator` | Writes a visual separator to normal or error logging for readable reports. |
 | `log_blank_line` | Adds a blank informational log line without repeating formatting code. |
 | `WasMailSent` | Logs whether the external mail command succeeded; mail failure itself remains nonfatal to the cleanup result. |
-| `build_backup_mail_header` | Builds the optional title/comment block shared by success and failure email bodies. |
-| `MailTo` | Collects the newest log/error files, assembles body text, calls `send_mail`, and records delivery outcome. |
+| `build_backup_mail_header` | Builds the optional title/comment block shared by success and failure email bodies; `report.title` is the same run name used by MQTT and the subject. |
+| `MailTo` | Collects the newest log/error files, assembles body text, and reuses `backup_title` (`report.title`) as a run-name prefix for the subject before calling `send_mail` and recording delivery outcome. Subject whitespace is collapsed to keep multiline titles on one line; the body keeps the full title/comment. Blank titles preserve existing subjects. This shared path covers success, failure, dry-run and root rejection. |
 | `parse_syncoid_ts` | Parses Syncoid's timestamp suffix including signed or signless positive GMT offsets and returns a timezone-aware datetime for safe UTC comparison. |
 | `delete_syncoid_snapshots` | Lists snapshots for one explicit dataset, matches only configured Syncoid hosts, sorts newest-first, applies retain/age protection, and previews or destroys selected snapshots one at a time. It returns the matched/selected counts so dry-run reporting reuses the actual selection logic. Checked list/destroy failures propagate to `run_cleanup`; a failed destroy stops further work inside that dataset before any configured outer-loop continuation. |
 | `log_dry_run_report` | Writes the final aggregate dry-run summary after snapshot selection and, on successful dry-runs, after old-log retention preview. The summary is written before optional success mail so the email body/attachment includes it. |
 | `delete_old_files` | Applies the existing shared retention policy to timestamp-paired `.log`/`.err` groups. It returns matched/selected group and selected-file counts for the final report; in dry-run it only reports candidates and never removes files. |
-| `main` | Public entry point. Before public argument parsing, a private frozen-worker environment marker can route a PyInstaller child process directly into `publish_worker`; report/config data still arrives on stdin. Normal invocations provide standard `-h/--help` and `--version`, accept equivalent `-c CONFIG` / `--config CONFIG`, reject old operational flags, load/validate TOML before cleanup, preserve exit/exception behavior, and build the final MQTT report after finalization. Before calling MQTT it applies the shared success/failure gate, so successful delete and dry-run runs with `mqtt.on_success=false` never enter the notifier. The help/version actions exit before config loading or destructive work. |
+| `main` | Public entry point. Before public argument parsing, a private frozen-worker environment marker can route a PyInstaller child process directly into `publish_worker`; report/config data still arrives on stdin. Normal invocations explicitly derive argparse `prog` from the invoked filename so help/version naming also stays consistent on Python 3.14+. Help explains both TOML modes, root, notification gating, relative paths, and the no-age/zero-retention deletion case. Normal invocations provide standard `-h/--help` and `--version`, accept equivalent `-c CONFIG` / `--config CONFIG`, reject old operational flags, load/validate TOML before cleanup, preserve exit/exception behavior, and build the final MQTT report after finalization. Before calling MQTT it applies the shared success/failure gate, so successful delete and dry-run runs with `mqtt.on_success=false` never enter the notifier. The help/version actions exit before config loading or destructive work. |
 | `run_cleanup` | Cleanup lifecycle reused by the TOML interface: logger setup, root guard, input-file loading, dry-run/delete processing, optional mail, log retention, and empty `.err` cleanup. It aggregates dry-run snapshot counts, previews old-log retention before the final dry-run report on successful previews, applies identical mail success gating to delete and dry-run, and logs `Success mail report suppressed by mail.on_success=false.` on either successful mode when mail is enabled but success reporting is disabled. It records/classifies dataset failures, applies continuation settings, and prunes old logs destructively only after a successful delete run. |
 | Imported `parse_older_than` | Re-exported from `config_loader.py` so existing callers/tests can still use `CleanUpInSyncoidSnapshots.parse_older_than` while parsing logic lives with configuration validation. |
 
@@ -58,8 +58,9 @@ This file explains the current implementation. It is not a version history; rele
 | `DEFAULTS` | MQTT defaults for port, credentials, client ID, QoS, timeout, TLS paths, and success publishing (`on_success=false`). |
 | `should_send_notification` | Single shared notification-policy helper used by both the main mail lifecycle and MQTT lifecycle. It returns true for every failure, and for success only when the channel's `on_success=true`, preventing dry-run from having a separate success rule. |
 | `validate_mqtt_config` | Validates the enabled `[mqtt]` TOML settings, rejects unknown/wrong types and wildcard publish topics, normalizes empty optional strings to absent values, enforces username/password and certificate/key relationships, and resolves certificate files relative to the TOML directory. |
-| `build_mqtt_report` | Produces the Home Assistant-facing JSON schema using cleanup result, report metadata, warning state, command, version, and bounded command diagnostics. Dry-run payloads additionally receive the aggregate `dry_run_report` object supplied by the cleanup lifecycle. |
-| `notify_mqtt` | Defensive MQTT notification wrapper. It re-applies `should_send_notification` so a successful report with `mqtt.on_success=false` cannot launch the publisher even if a caller bypasses the main lifecycle gate. In source mode it starts `mqtt_notifications.py --publish`; in a PyInstaller build it relaunches the same frozen executable with a private environment marker. Both forms pass config/report on stdin, enforce the hard timeout, keep credentials off argv, and leave cleanup outcome unchanged if publishing fails. |
+| `build_mqtt_report` | Uses the configured run name (`report.title`) in JSON `title`, with application-name fallback when blank. Keeps `name` fixed for blueprint identification and `job` as the log prefix. Produces the Home Assistant-facing JSON schema using cleanup result, report metadata, warning state, command, version, and bounded command diagnostics. Dry-run payloads additionally receive the aggregate `dry_run_report` object supplied by the cleanup lifecycle. |
+| `_run_publisher` | Starts the publisher in a new Linux session with stdin and captured output pipes. `communicate` enforces the configured timeout. On timeout or interruption, `os.killpg(..., SIGKILL)` terminates that isolated process group, including PyInstaller bootloader descendants, before draining pipes and reaping the launcher. It returns a `CompletedProcess` to preserve the caller's nonfatal-delivery policy. |
+| `notify_mqtt` | Defensive MQTT notification wrapper. It re-applies `should_send_notification` so a successful report with `mqtt.on_success=false` cannot launch the publisher even if a caller bypasses the main lifecycle gate. In source mode it starts `mqtt_notifications.py --publish`; in a PyInstaller build it relaunches the same frozen executable with a private environment marker. Both forms use `_run_publisher` to pass config/report on stdin, enforce the hard timeout for the entire isolated publisher process group, keep credentials off argv, and leave cleanup outcome unchanged if publishing fails. |
 | `publish_worker` | Internal Paho one-shot MQTT 3.1.1 publisher. Builds auth/TLS context, publishes with configured QoS, and always uses `retain=False`. |
 | `if __name__ == "__main__"` worker gate | Accepts only the internal `--publish` argument. This is not a public application option; normal users run `CleanUpInSyncoidSnapshots.py -c CONFIG`. Unexpected worker arguments exit immediately. |
 
@@ -86,7 +87,7 @@ This file explains the current implementation. It is not a version history; rele
 | `test_mail_requires_recipient_only_when_enabled` | Confirms explicit mail enablement cannot proceed without a recipient. |
 | `test_relative_paths_are_config_relative` | Confirms dataset/hostname paths follow the TOML file rather than current working directory. |
 | `test_cli_rejects_old_operational_options` | Confirms an old operational CLI option is rejected and cleanup is not called. |
-| `test_cli_help_is_available_without_cleanup` | Confirms standard `-h/--help` is available, documents `--version` plus both configuration spellings, shows examples, exits 0, and never enters cleanup. |
+| `test_cli_help_is_available_without_cleanup` | Confirms standard `-h/--help` is available, documents `--version` plus both configuration spellings, shows examples, exits 0, checks the safety/mode guidance, tolerates equivalent metavar formatting across Python versions, and never loads configuration or enters cleanup. |
 | `test_cli_version_is_available_without_cleanup` | Confirms `--version` prints the current application version, exits 0, and never enters cleanup or configuration loading. |
 | `test_gitignore_keeps_examples_and_excludes_release_artifacts` | Guards the release rules that shipped examples remain explicitly unignored, malformed spaced negation rules are absent, and Python cache/build/temp artifacts are covered by repository ignore patterns. |
 | `test_cli_long_config_alias_loads_same_toml` | Confirms `--config CONFIG` loads the same TOML path and reaches the same cleanup lifecycle as `-c CONFIG`. |
@@ -118,6 +119,7 @@ This file explains the current implementation. It is not a version history; rele
 | `test_success_requires_same_explicit_opt_in_for_delete_and_dry_run` | Confirms the same `mqtt.on_success=true` opt-in enables successful delete and successful dry-run reports. |
 | `test_delivery_failure_is_logged_and_secret_not_echoed` | Confirms publisher failures are nonfatal and worker stderr is not copied into logs where credentials could leak. |
 | `test_timeout_is_nonfatal` | Confirms a stuck publisher is bounded and only logged. |
+| `test_timeout_kills_publisher_process_group` | Simulates an exited launcher whose child keeps output pipes open; proves timeout cleans up descendants promptly instead of waiting for the child's sleep. |
 | `test_worker_tls_and_auth` | Verifies Paho receives the configured TLS context and username/password. |
 
 ### `FrozenBuildTests`
@@ -142,7 +144,10 @@ This file explains the current implementation. It is not a version history; rele
 
 | Test/helper | Purpose |
 | --- | --- |
-| `invoke` | Runs real `main()`/TOML/lifecycle flow with temporary files and safe mocks for ZFS, log cleanup, mail, and MQTT. |
+| `invoke` | Runs real `main()`/TOML/lifecycle flow with temporary files and safe mocks for ZFS, log cleanup, mail, and MQTT. Optional `report_title` supplies the run name; `real_mail=True` exercises real `MailTo` while mocking the external `send_mail` boundary. |
+| `test_named_run_reaches_mail_subject_body_and_mqtt` | Exercises real TOML loading, cleanup lifecycle, `MailTo` and MQTT report creation for delete/dry-run success, command failure and root rejection; only external mail, ZFS and MQTT delivery are mocked. Checks the same run name reaches every subject, body and MQTT `title`, while app/job identifiers remain stable. |
+| `test_blank_run_name_preserves_email_subject_and_mqtt_fallback` | Confirms blank names leave existing subjects unchanged and preserve MQTT's application-name fallback. |
+| `test_multiline_run_name_is_single_line_in_subject_only` | Confirms CR/LF/tab whitespace cannot create multiline subjects; body/MQTT retain the configured title text after existing outer trimming. |
 | `test_success_final_report` | Confirms a successful delete lifecycle emits MQTT success. |
 | `test_dry_run_final_report_contains_zero_destructive_actions` | Confirms a successful dry-run carries the aggregate report and records no destructive actions. |
 | `test_success_mail_is_suppressed_for_delete_and_dry_run_by_default` | Confirms mail success notifications are silent for both modes when `mail.on_success=false`. |
@@ -194,7 +199,7 @@ This file explains the current implementation. It is not a version history; rele
 
 | Test/helper | Purpose |
 | --- | --- |
-| `exchange` | Starts a loopback-only miniature MQTT broker fixture and invokes the real isolated Paho publisher. |
+| `exchange` | Starts a loopback-only miniature MQTT broker fixture and invokes the real isolated Paho publisher. Its successful report sets `on_success=True` explicitly so it reaches the publisher under the same production opt-in policy; otherwise the test would wait for a connection that can never arrive. |
 | `exchange.serve` | Accepts the client, sends success/rejection/stall responses, captures publish topic/payload/flags, and performs QoS acknowledgements. |
 | `test_real_qos_0_1_2_delivery` | Verifies actual Paho QoS 0/1/2 loopback delivery and non-retained messages when Paho is installed. |
 | `test_broker_rejection` | Confirms broker rejection is logged by the parent and does not leak into cleanup outcome. |
@@ -207,7 +212,7 @@ This file explains the current implementation. It is not a version history; rele
 | `sudo python3 CleanUpInSyncoidSnapshots.py -c config.toml` | Public cleanup invocation using the short configuration selector. `-c` chooses the TOML file; every cleanup/retention/reporting setting comes from it. |
 | `sudo python3 CleanUpInSyncoidSnapshots.py --config config.toml` | Equivalent public cleanup invocation using the long configuration selector. |
 | `python3 CleanUpInSyncoidSnapshots.py -h` / `--help` | Displays the standard CLI help, every public flag, and examples, then exits before configuration loading, root checks, logging, or ZFS work. |
-| `python3 CleanUpInSyncoidSnapshots.py --version` | Prints `CleanUpInSyncoidSnapshots.py 0.0.14` and exits before configuration loading, logging, root checks, or ZFS work. |
+| `python3 CleanUpInSyncoidSnapshots.py --version` | Prints `CleanUpInSyncoidSnapshots.py 0.0.16` and exits before configuration loading, logging, root checks, or ZFS work. |
 | `sudo .venv/bin/python CleanUpInSyncoidSnapshots.py -c config.toml` | Same cleanup invocation when using the documented virtual environment. |
 | `zfs list -H -t snapshot -o name DATASET` | Lists snapshot names for one explicit dataset in machine-readable form; no recursive traversal is requested. Checked failures are recorded and the matching cleanup continuation setting decides whether the outer loop advances to the next dataset. |
 | `zfs destroy SNAPSHOT` | Deletes exactly one selected snapshot. No `-r`, force, wildcard, or shell expansion is used. A checked failure is classified as an “other” dataset failure; it stops work inside that dataset and the outer loop then follows `continue_on_other_failures`. |
@@ -236,7 +241,7 @@ This file explains the current implementation. It is not a version history; rele
 | `requirements-build.txt` | PyInstaller build environment requirements: runtime MQTT dependency set, forced Tomli fallback, and PyInstaller itself. |
 | `CleanUpInSyncoidSnapshots.spec` | One-file PyInstaller definition. Explicit hidden-import collection includes all Paho and Tomli submodules; project/stdlib modules are discovered normally. |
 | `build-pyinstaller.sh` | Build helper that recreates the isolated build venv and leaves the final executable at `dist/CleanUpInSyncoidSnapshots`, then smoke-tests it. |
-| `dist/` | Generated final executable output directory. It is intentionally ignored by Git and recreated for builds. |
+| `dist/` | Generated final executable output directory. It is intentionally ignored by Git, recreated for builds, and included in the release ZIP with the current standalone executable. Runtime logs are created only when running cleanup. |
 | `datasets-example` | Original dataset-list example. |
 | `hostnames-example` | Original hostname-list example. |
 | `home-assistant/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml` | Receive-only example blueprint for final MQTT reports. |
@@ -244,6 +249,7 @@ This file explains the current implementation. It is not a version history; rele
 | `README.md` | Current usage/configuration documentation only. |
 | `VERSIONING.md` | Release history and version policy. |
 | `VERIFICATION.md` | Evidence and test limitations for the packaged release. |
+| `PACKAGE_MANIFEST.json` | Original-relative path comparison and SHA-256 hashes for the packaged files, plus unchanged/modified/added classifications. The manifest excludes its own hash to avoid a circular digest; ZIP integrity and the external archive checksum cover it. |
 | `DISCLAIMER.md` | Existing liability/data-loss warning. |
 | `.gitignore` | Keeps local runtime TOML/input files, logs, Python caches, virtual environments, and build outputs out of commits while explicitly preserving `config-example.toml`. |
 | `.github/CODEOWNERS` | Existing repository ownership metadata. |
@@ -258,3 +264,11 @@ This file explains the current implementation. It is not a version history; rele
 - Dataset-level checked ZFS failures always make the final result fail. The two explicit continuation settings only control whether the next configured dataset is attempted; setting either to `false` restores stop-immediately behavior for that category.
 - Mail and MQTT remain optional notification layers; neither can make snapshot-selection logic broader.
 - MQTT publishing stays in a separate timeout-bounded worker and remains non-retained.
+
+## Build specification and shell commands
+
+`CleanUpInSyncoidSnapshots.spec` uses `collect_submodules` to include optional MQTT and TOML fallback modules. `Analysis` resolves the entry point, imports, and dependencies; `PYZ` bundles Python modules; `EXE` creates the console one-file executable. No runtime config or secrets are embedded.
+
+`build-pyinstaller.sh` uses `cd` to select its own project directory, reads optional `PYTHON_BIN` and `VENV_DIR` overrides (defaults: `python3` and `.venv-build`), and removes the selected virtualenv, `build/`, and `dist/` with `rm -rf` before recreating output with `mkdir -p`. Supply a dedicated disposable build-venv path if overriding `VENV_DIR`. `python -m venv` creates isolation; `python -m pip install -r requirements-build.txt` installs the declared build dependencies. `pyinstaller --clean --noconfirm --distpath ... --workpath ... SPEC` clears its working cache, replaces output, and separates final output from build intermediates. `find` and `mapfile` enumerate every direct output entry, including hidden entries; shell count/path/regular-file/executable checks reject extra or invalid output. The executable's `--version` and `--help` smoke checks run before success is printed. `set -euo pipefail` aborts on failed commands, undefined variables, and pipeline errors.
+
+The Home Assistant blueprint's `trigger: mqtt` receives reports for one exact configured topic. Its template conditions validate the application/status and apply notification preferences. `persistent_notification.create` displays a report, optionally reusing `notification_id`; it performs no cleanup commands.
