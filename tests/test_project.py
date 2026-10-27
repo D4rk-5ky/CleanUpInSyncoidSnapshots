@@ -21,8 +21,8 @@ from unittest.mock import Mock, patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import CleanUpInSyncoidSnapshots as app
-import config_loader as config
-import mqtt_notifications as mqtt
+from modules import config_loader as config
+from modules import mqtt_notifications as mqtt
 
 
 def arguments(**overrides):
@@ -90,26 +90,26 @@ on_success = {str(mqtt_on_success).lower()}
 
 class TomlConfigTests(unittest.TestCase):
     def test_example_contains_every_supported_setting(self):
-        with (ROOT / "config-example.toml").open("rb") as stream:
+        with (ROOT / "configs/config-example.toml").open("rb") as stream:
             document = config.tomllib.load(stream)
         self.assertEqual(set(document), config.TOP_LEVEL_SECTIONS)
         for section, keys in config.SECTION_KEYS.items():
             if section == "mqtt":
                 # Legacy aliases and optional derived values are documented as comments.
                 import re
-                text = (ROOT / "config-example.toml").read_text().split("[mqtt]", 1)[1]
+                text = (ROOT / "configs/config-example.toml").read_text().split("[mqtt]", 1)[1]
                 examples = set(re.findall(r"(?m)^\s*(?:#\s*)?([A-Za-z_][A-Za-z_0-9]*)\s*=", text))
                 self.assertEqual(examples, keys)
             else:
                 self.assertEqual(set(document[section]), keys)
 
     def test_example_loads_and_is_safe_by_default(self):
-        loaded = config.load_config(ROOT / "config-example.toml", "fallback")
+        loaded = config.load_config(ROOT / "configs/config-example.toml", "fallback")
         self.assertEqual(loaded.command, "dry-run")
         self.assertFalse(loaded.send_mail)
         self.assertIsNone(loaded.mqtt_config)
         self.assertTrue(Path(loaded.datasets_file).is_absolute())
-        self.assertEqual(Path(loaded.datasets_file), ROOT / "datasets-example")
+        self.assertEqual(Path(loaded.datasets_file), ROOT / "configs/datasets-example")
 
     def test_defaults_and_negative_retain_compatibility(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -515,7 +515,7 @@ class FrozenBuildTests(unittest.TestCase):
 
 class BlueprintTests(unittest.TestCase):
     def setUp(self):
-        self.path = ROOT / "home-assistant" / "CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml"
+        self.path = ROOT / "examples" / "CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml"
         self.text = self.path.read_text(encoding="utf-8")
 
     def test_blueprint_is_receive_only_mqtt_reporter(self):

@@ -14,6 +14,19 @@ and explain how to run the current source or rebuild in a disposable copy.
 The initial historical archive had no version identifier or version history. It is the
 unversioned baseline; 0.0.1 is the first numbered release, with no invented prior releases.
 
+## 0.0.20 — 2026-10-27
+
+- Increment source version from 0.0.19 to 0.0.20, exactly one patch step.
+- Move config_loader.py, mqtt_notifications.py and mqtt_reporting.py into modules/. Add a minimal modules/__init__.py package marker. Update main imports to modules.* and intra-package imports to relative imports. Preserve the existing absolute-path source worker launchers and frozen worker hooks; both source workers remain independent of the shell working directory.
+- Move config.toml, config-example.toml, datasets-example and hostnames-example into configs/. Keep both TOML examples identical and preserve every parsed setting, existing completion topic and config-relative input/certificate resolution. Update only usage comments/version headers. Existing external -c/--config paths keep working.
+- Move live-preview-card.yaml, success-failure-automation.yaml and the former home-assistant persistent-notification blueprint into examples/. No standalone JSON example existed; PACKAGE_MANIFEST.json is release metadata and stays at the root. Move the blueprint without changing its contents.
+- Remove the now-empty home-assistant directory in the new release. Every existing project file is retained at its original or explicitly requested relocated path; do not add duplicate root wrappers or config/example copies.
+- Unignore the configs/ directory and complete config example so repository ignore rules do not hide the shipped examples. Keep site-local configs/config.toml ignored as before.
+- Update README/current code map, module/config usage, CLI help examples, tests, synchronized version ledgers, verification and manifest for the new layout. Keep all earlier ledger entries and disclaimer text verbatim. Add relocation mappings to the package audit so moves are distinguished from file loss.
+- Add four layout regressions covering unique file locations, external-CWD CLI/config loading, both actual source MQTT worker processes under fake Paho, and real Git ignore rules in a temporary repository. Retain all previous regression coverage.
+
+Dataset 2/5 progress, snapshot selection/deletion/retention, root enforcement, continuation/exit semantics, logging location, notifications, scheduling, public CLI flags and configuration values are unchanged. Preserve the original 0.0.16 executable, build helper/spec and requirements; run current Python source for this layout. See VERIFICATION.md.
+
 ## 0.0.19 — 2026-10-27
 
 - Increment source version from 0.0.18 to 0.0.19, exactly one patch step.

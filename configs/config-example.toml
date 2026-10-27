@@ -1,7 +1,8 @@
-# CleanUpInSyncoidSnapshots 0.0.19 source configuration example.
-# Copy this file to e.g. config.toml, edit it, and run with either equivalent flag:
-#   sudo python3 CleanUpInSyncoidSnapshots.py -c config.toml
-#   sudo python3 CleanUpInSyncoidSnapshots.py --config config.toml
+# CleanUpInSyncoidSnapshots 0.0.20 source configuration example.
+# From the project root, edit configs/config.toml (or copy this example there)
+# and run with either equivalent flag. Input examples stay beside this TOML:
+#   sudo python3 CleanUpInSyncoidSnapshots.py -c configs/config.toml
+#   sudo python3 CleanUpInSyncoidSnapshots.py --config configs/config.toml
 # Use -h/--help to show all public flags and mode/safety guidance.
 # Use --version to print the application version without loading configuration.
 # Both execution modes require root and create local logs. Dry-run can also send

@@ -1,8 +1,0 @@
-Actual ./build-pyinstaller.sh result: exit 0
-83 INFO: PyInstaller: 6.22.3, contrib hooks: 2026.9
-84 INFO: Python: 3.14.4
-107 INFO: Platform: Linux-7.0.0-38-generic-x86_64-with-glibc2.43
-12821 INFO: Build complete! The results are available in: ./dist
-CleanUpInSyncoidSnapshots 0.0.19
-Built: ./dist/CleanUpInSyncoidSnapshots
-Verified: dist/ contains only CleanUpInSyncoidSnapshots
