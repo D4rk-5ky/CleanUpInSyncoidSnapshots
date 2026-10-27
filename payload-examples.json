@@ -1,0 +1,105 @@
+{
+  "success": {
+    "status": "success",
+    "success": true,
+    "title": "Syncoid snapshot cleanup",
+    "name": "CleanUpInSyncoidSnapshots",
+    "job": "CleanUpInSyncoidSnapshots",
+    "dry_run": false,
+    "exit_code": 0,
+    "error": "",
+    "stderr": "",
+    "warning": false,
+    "schema_version": 1,
+    "command": "delete",
+    "comment": "",
+    "version": "0.0.16",
+    "timestamp": "2026-10-27T08:00:00+00:00",
+    "host": "nas",
+    "run_id": "example-success",
+    "planned_datasets": [
+      {
+        "source": "tank/data"
+      }
+    ],
+    "skipped_datasets": [],
+    "failed_datasets": []
+  },
+  "failure": {
+    "status": "failure",
+    "success": false,
+    "title": "Syncoid snapshot cleanup",
+    "name": "CleanUpInSyncoidSnapshots",
+    "job": "CleanUpInSyncoidSnapshots",
+    "dry_run": false,
+    "exit_code": 1,
+    "error": "Example ZFS dataset failure",
+    "stderr": "permission denied",
+    "warning": false,
+    "schema_version": 1,
+    "command": "delete",
+    "comment": "",
+    "version": "0.0.16",
+    "timestamp": "2026-10-27T08:00:00+00:00",
+    "host": "nas",
+    "run_id": "example-failure",
+    "planned_datasets": [
+      {
+        "source": "tank/data"
+      }
+    ],
+    "skipped_datasets": [],
+    "failed_datasets": [
+      {
+        "source": "tank/data",
+        "reason": "Example ZFS dataset failure",
+        "stderr": "permission denied",
+        "exit_code": 1,
+        "kind": "other"
+      }
+    ]
+  },
+  "dry_run": {
+    "status": "success",
+    "success": true,
+    "title": "Syncoid snapshot cleanup",
+    "name": "CleanUpInSyncoidSnapshots",
+    "job": "CleanUpInSyncoidSnapshots",
+    "dry_run": true,
+    "exit_code": 0,
+    "error": "",
+    "stderr": "",
+    "warning": false,
+    "schema_version": 1,
+    "command": "dry-run",
+    "comment": "",
+    "version": "0.0.16",
+    "timestamp": "2026-10-27T08:00:00+00:00",
+    "host": "nas",
+    "run_id": "example-dry_run",
+    "planned_datasets": [
+      {
+        "source": "tank/data"
+      }
+    ],
+    "skipped_datasets": [],
+    "failed_datasets": [],
+    "dry_run_report": {
+      "datasets_configured": 1,
+      "datasets_completed": 1,
+      "dataset_failures": 0,
+      "snapshots_matched": 8,
+      "snapshots_would_delete": 3,
+      "log_retention_evaluated": true,
+      "log_groups_would_delete": 0,
+      "log_files_would_delete": 0,
+      "datasets": [
+        {
+          "dataset": "tank/data",
+          "matched": 8,
+          "selected": 3
+        }
+      ]
+    }
+  }
+}

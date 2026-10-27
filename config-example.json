@@ -1,0 +1,64 @@
+{
+  "cleanup": {
+    "command": "dry-run",
+    "datasets_file": "datasets-example",
+    "syncoid_hosts_file": "hostnames-example",
+    "older_than": "7d",
+    "retain_count": 10,
+    "continue_on_missing_dataset": true,
+    "continue_on_other_failures": true
+  },
+  "logging": {
+    "prefix": "CleanUpInSyncoidSnapshots"
+  },
+  "report": {
+    "title": "Syncoid snapshot cleanup",
+    "comment": ""
+  },
+  "mail": {
+    "enabled": false,
+    "recipient": "you@example.com",
+    "on_success": false
+  },
+  "completion": {
+    "enabled": false,
+    "host": "mqtt.example.lan",
+    "port": 1883,
+    "topic": "homeassistant/CleanUpInSyncoidSnapshots/Zotac-RI531/status",
+    "username": "",
+    "password": null,
+    "client_id": "",
+    "qos": 0,
+    "timeout": 15,
+    "tls": false,
+    "ca_certs": null,
+    "certfile": null,
+    "keyfile": null,
+    "on_success": true,
+    "send_on_dry_run": true
+  },
+  "live": {
+    "enabled": false,
+    "host": "mqtt.example.lan",
+    "port": 1883,
+    "username": "",
+    "password": null,
+    "client_id": "",
+    "qos": 1,
+    "timeout": 5,
+    "tls": false,
+    "ca_certs": null,
+    "certfile": null,
+    "keyfile": null,
+    "device_id": "cleanup_syncoid_snapshots",
+    "topic_prefix": "job-live",
+    "discovery": true,
+    "discovery_prefix": "homeassistant",
+    "send_on_dry_run": false,
+    "heartbeat_seconds": 10,
+    "min_publish_interval": 1,
+    "expire_after": 45,
+    "discovery_interval": 300,
+    "final_wait": 1
+  }
+}
