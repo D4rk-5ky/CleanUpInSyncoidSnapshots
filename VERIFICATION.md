@@ -1,50 +1,57 @@
-# Verification — CleanUpInSyncoidSnapshots 0.0.16
+# Verification — CleanUpInSyncoidSnapshots 0.0.20
 
-Date: 2026-10-27. Runtime: Python 3.14.4, Linux x86_64, glibc 2.43.
+Date: 2026-10-27. Previous release: 0.0.19. Current source: 0.0.20 (one patch step).
 
-## Automated regression suite
+## Layout
 
-```text
+- `modules/`: config_loader.py, mqtt_notifications.py and mqtt_reporting.py, with a minimal __init__.py package marker. Root main imports use modules.*; internal imports are relative. Source workers still launch their own absolute file paths. Frozen hooks, build helper/spec and requirements are unchanged.
+- `configs/`: config.toml, config-example.toml, datasets-example and hostnames-example. Both TOML files remain identical and their parsed values are identical to 0.0.19. Input paths stay relative to the selected TOML; the input examples remain beside it. Root help/README commands now use `-c configs/config.toml`; external custom config paths continue to work.
+- `examples/`: live-preview-card.yaml, success-failure-automation.yaml and the relocated persistent-notification blueprint formerly under home-assistant/. All three YAML files retain their exact bytes. The now-empty home-assistant directory is removed in the new release.
+- No standalone JSON example existed. PACKAGE_MANIFEST.json is actual release metadata and remains at root. No new JSON configuration/state/cache/log files are introduced.
+
+Ten existing files are relocated, one package marker is added, and every one of the previous 28 project files is retained at its existing or mapped destination. The release contains 29 files. No duplicate root wrappers or copied config/example files are left behind. VERSIONING.md/versioning.md record the change and retain all previous entries verbatim; README and the code map describe current paths. Disclaimers remain verbatim.
+
+The configs directory/example is explicitly unignored so Git does not hide the shipped reference; site-local configs/config.toml remains ignored. Packaging deliberately includes the safe distributed config copy, as in the previous release.
+
+## Verification completed
+
+Environment: Linux x86-64, Python 3.14.4, Paho MQTT 2.1.0, Jinja2 and PyYAML.
+
+- 141 tests passed, zero failures/skips, in 7.008 seconds. All previous dataset progress (2/5), cleanup/retention, exit-code, notification, stderr, live state, HA/Pushover rendering and ephemeral localhost broker coverage remains passing.
+- Four new layout regressions verify unique relocated paths, help/version and config loading from a foreign working directory, both actual source worker subprocesses under fake Paho from that directory, and real Git ignore behavior in an isolated temporary repository.
+- Real MQTT protocol tests use ephemeral localhost fixtures only. ZFS, mail and production notification effects are intercepted; no destructive job, live Pushover notification or installed HA change occurs.
+- Compile seven Python files (including the new package marker) plus the PyInstaller spec. Bytecode is written only to scratch outside the release. Bash syntax passes. Twenty source/preserved-executable CLI help/version/invalid-input checks pass without runtime logs; four further checks run after fresh ZIP extraction.
+- AST comparison confirms every runtime function/class matches 0.0.19 after normalizing package-import syntax and the CLI help's config path. The only other source edits are version metadata and usage documentation. Dataset progress, snapshot selection, exact ZFS argv, retention, root guard, continuation/error codes, notifications, log placement and scheduling are unchanged.
+- Both TOML configs have identical bytes and unchanged parsed settings, including every non-MQTT value, completion topic, disabled defaults and placeholder credential. All 61 supported settings remain represented, including optional/legacy examples in comments.
+- Unchanged input examples and YAML files match their prior content hashes at the new destinations. Binary, build helper/spec, requirements, ownership metadata and DISCLAIMER.md are byte-identical to 0.0.19. README disclaimers and prior version entries are verbatim; paired ledgers match.
+- The code map covers all 261 functions/methods/nested helpers and all 25 classes. The package marker has no functions or job actions and is explained in the file/layout map.
+
+Run from the project root:
+
+```bash
 python3 -B -m unittest discover -s tests -v
-Ran 141 tests in 4.564s
-OK
+python3 CleanUpInSyncoidSnapshots.py --help
+python3 CleanUpInSyncoidSnapshots.py --version
 ```
 
-All 141 tests passed; none skipped. Full output is in `verification/unittest.txt`.
+For a reviewed job configuration, use the same public CLI with the relocated sample path:
 
-The suite includes the existing cleanup/config/mail/log-retention checks, the supplied template's completion/live checks, new adapter integration checks, and real frozen worker tests. Test imports and worker isolation/syntax-check paths were adapted to the `modules/` package; the two reporting modules themselves are byte-for-byte copies of the supplied template 1.1.0.
+```bash
+sudo python3 CleanUpInSyncoidSnapshots.py -c configs/config.toml
+```
 
-Verified behavior includes:
+No operational cleanup command above was run during verification; actual effects are exercised only with safe test substitutes.
 
-- All supporting Python modules live under `modules/`, with package imports in the entry point and relative adapter imports. Source workers launch the relocated files; frozen workers use the bundled package.
-- Required completion JSON fields, typed booleans/integer code, success/status/code agreement, schema version, UTC timestamp, host, run ID and 4,000-character stderr tail.
-- Cleanup's dry-run summary and planned/failed/skipped dataset diagnostics.
-- Independent completion/live enable switches in all four combinations, shared run IDs, separate success and dry-run gates, and live-only operation.
-- New JSON and equivalent TOML config, exact template option sets, TLS file resolution, strict validation and legacy MQTT defaults/alias conflict checks.
-- Real measured dataset progress, unknown transfer values, successful/failed/skipped classifications, checked failures with continuation, immediate stops, interrupts and root rejection.
-- Finalization failure remains failure; nonfatal mail errors set warning while preserving success.
-- Live transport failure preserves cleanup and completion outcomes. Duplicate live launches do not run ZFS or overwrite active live state.
-- Dry-run never destroys snapshots, prunes old logs or overwrites retained real-run live results.
-- No Paho imports/transport workers when channels are disabled; credentials remain on worker stdin; errors are sanitized.
-- Real Paho 2.1.0 completion delivery against a local fake MQTT broker at QoS 0, 1 and 2, including broker rejection and a deliberately stalled connection.
-- Source workers against fake Paho helpers, heartbeat/discovery/retention policies and subprocess deadlines/cancellation.
-- Both rebuilt executable private worker routes against a local fake MQTT broker: completion JSON is non-retained, all 14 discovery messages are retained, live state is non-retained and final real-run result is retained. Invalid private requests exit before configuration/cleanup.
-- Python 3.10 syntax compatibility for application/reporting/config modules. Runtime execution used Python 3.14.4 only.
+## Archive audit
 
-## Real frozen build
+PACKAGE_MANIFEST.json records the supplied original archive and previous 0.0.19 archive, both SHA-256 digests, explicit source-to-destination relocation mappings, source/release content hashes and sizes, file permission modes, and per-file unchanged/modified/relocated/added status. A moved path is audited against its original source path, not reported as a lost file. Every original and previous file resolves to a unique packaged destination, with no unmapped missing files.
 
-The existing `./build-pyinstaller.sh` completed successfully using:
+Verify safe unique relative ZIP paths, CRCs, complete tree/archive equality, all file hashes/sizes/modes, relocation completeness and a fresh extraction. Preserve recorded executable permissions; use 0644 data files and 0755 directories where no original Unix mode is recorded. Manifest self-hash/size are omitted to avoid circular metadata; the external ZIP checksum covers it. Report/manifest sidecars have the same bytes as their packaged copies.
 
-- PyInstaller 6.22.3, hooks 2026.9.
-- Python 3.14.4, Paho MQTT 2.1.0, Tomli 2.5.0.
-- Linux x86_64, glibc 2.43.
+No __pycache__, .pyc/.pyo, venvs, build/cache intermediates, runtime logs, temporary files or test Git repository is packaged. The original final dist executable is retained as a deliverable.
 
-`dist/` contains exactly one regular executable: `CleanUpInSyncoidSnapshots`. Its `--version` reports **0.0.16** and `--help` succeeds. It bundles both reporting modules and the optional Python dependencies. The source and build helper are included for rebuilding on the target Linux distribution; this binary is not verified on other architectures or older glibc versions.
+## Live-test limits
 
-## Additional checks
+Production ZFS, mail/Pushover, MQTT credentials/ACLs/TLS and an installed Home Assistant instance remain untested. Actual deployment of discovery/cards/automations and another Python/platform require live testing. No scheduling or installed HA state was changed.
 
-Source and executable version/help checks also passed from an unrelated working directory. Python compilation, shell syntax, config/payload example validation, original-vs-vendored module byte comparisons and package-manifest checks succeeded. Both HA YAML files parse successfully. The notification condition was rendered with Jinja against matching success/failure events and malformed status/code/success variants; matching events pass and malformed events are rejected.
-
-## Limits
-
-No production ZFS operations, mail delivery, production broker/TLS endpoint, or live Home Assistant instance were exercised. ZFS and mail are mocked in tests. Broker tests use local fake MQTT servers, so they confirm transport behavior rather than HA ingestion, notification display or dashboard rendering. Live final delivery is best effort under the template's bounded drain; running sensors can expire during outages. The live lock coordinates identities only within this installation's log directory.
+The preserved dist/CleanUpInSyncoidSnapshots remains version 0.0.16 and does not include the integration/layout changes. Use the current Python source, or rebuild in a disposable project copy using the unchanged helper. PyInstaller is unavailable in the active interpreter; no dependency installation or rebuilt frozen executable was attempted. Import/package wiring is compiled and source-worker tested; a new frozen build remains unverified.

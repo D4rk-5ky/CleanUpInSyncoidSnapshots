@@ -1,0 +1,174 @@
+# CleanUpInSyncoidSnapshots 0.0.20 source configuration example.
+# From the project root, edit configs/config.toml (or copy this example there)
+# and run with either equivalent flag. Input examples stay beside this TOML:
+#   sudo python3 CleanUpInSyncoidSnapshots.py -c configs/config.toml
+#   sudo python3 CleanUpInSyncoidSnapshots.py --config configs/config.toml
+# Use -h/--help to show all public flags and mode/safety guidance.
+# Use --version to print the application version without loading configuration.
+# Both execution modes require root and create local logs. Dry-run can also send
+# enabled notifications and removes the current empty .err file at finalization.
+#
+# Relative filesystem paths in this file are resolved relative to this TOML file.
+
+[cleanup]
+# Operation to perform. Use "dry-run" first to preview without destroying snapshots.
+# Allowed values: "dry-run" or "delete".
+command = "dry-run"
+
+# Text file containing one exact local ZFS dataset name per non-empty line.
+# Checked ZFS list/destroy failures always make the final result a failure.
+# The continuation options below decide whether later datasets are processed.
+datasets_file = "datasets-example"
+
+# Text file containing syncoid hostnames, one per line. Blank lines and full-line
+# comments beginning with # are ignored in the hostname file.
+syncoid_hosts_file = "hostnames-example"
+
+# Optional age cutoff for snapshots and log groups. Use Nd, Nw, or Nm, where m is
+# treated as 30 days. Set to an empty string to disable the age cutoff.
+# WARNING: empty age + retain_count=0 selects ALL matching snapshots.
+# A zero age (0d/0w/0m) acts as no cutoff for snapshots; logs use a cutoff of now.
+older_than = "7d"
+
+# Number of newest matching snapshots to protect per hostname/dataset, and newest
+# log timestamp groups to protect. Negative values are normalized to 0.
+retain_count = 10
+
+# true = when a checked ZFS list OR destroy failure contains the case-insensitive
+# stderr text "dataset does not exist", record it and continue with the next
+# configured dataset. false = stop immediately.
+# Either way, the final result is failure and enabled mail/MQTT reports that failure.
+continue_on_missing_dataset = true
+
+# true = for any other checked ZFS list/destroy command failure on one dataset,
+# record the failure and continue with the next configured dataset. false = stop
+# immediately. This does not make global/config/root/input failures recoverable.
+continue_on_other_failures = true
+
+[logging]
+# Prefix used for generated .log and .err filenames. Empty uses the script basename.
+# Logs use `logs/` beside the source script or installed frozen executable.
+prefix = "CleanUpInSyncoidSnapshots"
+
+[report]
+# Optional run name, included as MQTT JSON "title", at the top of email bodies,
+# and as [run name] at the start of every email subject (success/failure/dry-run).
+# Empty leaves email subjects unchanged; MQTT then uses the application name.
+# Multiline title whitespace is collapsed to spaces in the email subject only.
+title = "Syncoid snapshot cleanup"
+
+# Optional free-form comment included in email and MQTT status reports.
+comment = ""
+
+[mail]
+# Mail is completely optional. false disables all mail delivery.
+enabled = false
+
+# Recipient used only when enabled=true. The host must already have a working
+# `mail`/`mailx` command supporting -s and --attach.
+recipient = "you@example.com"
+
+# false = send mail only after failure; successful delete and dry-run runs do not invoke
+# the mail success path. true = also send mail after success.
+on_success = false
+
+[mqtt]
+
+# Final completion JSON. Set true to enable the existing HA notification topic.
+MQTT_JSON_Status = false
+# Completion topic is required only when completion reporting is enabled.
+mqtt_json_topic = "homeassistant/CleanUpInSyncoidSnapshots/Zotac-RI531/status"
+
+# Success switch does not suppress failure reports when completion MQTT is enabled.
+SendMQTTOnSuccess = false
+# true allows completion previews; false suppresses them even on failure.
+MQTTJSONOnDryRun = true
+
+# Shared by both independent modules. Replace placeholders before enabling.
+broker_address = "mqtt.example.lan"
+broker_port = 1883
+mqtt_username = "YOUR_MQTT_USERNAME"
+mqtt_password = "YOUR_MQTT_PASSWORD"
+
+# Optional transport settings shared by both modules.
+# Enable verified TLS; supply CA path or empty for system trust roots.
+MQTTTLS = false
+# Optional CA path relative to this TOML; requires MQTTTLS=true.
+MQTTCAFile = ""
+# Optional mutual-TLS client certificate/key must both be set or both empty.
+MQTTCertFile = ""
+MQTTKeyFile = ""
+
+# Completion transport settings.
+# Completion QoS: integer 0, 1 or 2; default 1 preserves existing delivery.
+MQTTQoS = 1
+# Positive maximum seconds for the completion publisher process group.
+MQTTTimeoutSeconds = 15
+# Optional completion client ID; empty lets Paho choose one.
+MQTTClientID = ""
+
+# Live preview is independent of MQTT_JSON_Status and SendMQTTOnSuccess.
+LiveMQTTEnabled = false
+LiveMQTTDiscovery = true
+LiveBackupName = ""
+LiveManufacturer = "CleanUpInSyncoidSnapshots"
+LiveHeartbeatSeconds = 60
+
+# LiveBackupName is a fallback when [report].title is empty; both channels use
+# the same friendly name. Main progress counts nonempty datasets_file entries:
+# after two attempts in a five-entry file it shows 2 / 5 (40%). Failed dataset
+# attempts count as processed, but keep the job failed. The current entry has a
+# separate one-based position. Snapshot outcomes never advance dataset progress.
+# Total is known immediately after reading datasets_file; before then it is null.
+# Blank lines are ignored; repeated entries count separately, as they run.
+# No transfer measurements are made: byte/rate fields remain null.
+#
+# Non-retained lifecycle events on job-live/<device_id>/events.
+# These do not disable live sensors or the retained last result, and they do
+# not send Pushover directly. Completion/Pushover uses mqtt_json_topic above.
+LiveNotifyStart = false
+LiveNotifySuccess = true
+LiveNotifyFailure = true
+
+# Optional live overrides. If LiveDeviceID is omitted it is derived from the
+# hostname, job identifier and config path. Explicit ID preserves existing HA IDs.
+# LiveDeviceID = "cleanup_syncoid_unique_host_job"
+# Live topics are <prefix>/<device_id>/{state,last_result,events}.
+LiveTopicPrefix = "job-live"
+# Match the discovery prefix configured in Home Assistant.
+LiveDiscoveryPrefix = "homeassistant"
+# Independent live QoS, integer 0, 1 or 2.
+LiveMQTTQoS = 1
+# Positive timeout per live batch; stalled groups are killed.
+LivePublishTimeoutSeconds = 5
+# Empty generates ha-live-<device_id>; keep any override unique.
+LiveClientID = ""
+# Coalesce updates; positive and no larger than LiveHeartbeatSeconds.
+LiveMinPublishIntervalSeconds = 1
+# Optional: otherwise derived safely from heartbeat and timeout (180 for 60s).
+# LiveExpireAfterSeconds = 180
+# Positive interval for rediscovery after broker/HA restarts.
+LiveDiscoveryIntervalSeconds = 300
+# Best-effort terminal drain; finish and close each wait up to this many seconds.
+LiveFinalWaitSeconds = 1
+# Opt into live previews; they never replace the retained last REAL result.
+LiveMQTTOnDryRun = false
+
+# Compatibility: existing configs need no migration. Supplied option names above
+# take precedence when both forms are present. Legacy aliases (not additional
+# independent channels): enabled, on_success, topic, host, port, username,
+# password, client_id, qos, timeout, tls, ca_certs, certfile, keyfile.
+# enabled = false                 # alias of MQTT_JSON_Status
+# on_success = false              # alias of SendMQTTOnSuccess
+# topic = "homeassistant/CleanUpInSyncoidSnapshots/Zotac-RI531/status"
+# host = "mqtt.example.lan"        # alias of broker_address
+# port = 1883                     # alias of broker_port
+# username = "YOUR_MQTT_USERNAME"  # alias of mqtt_username
+# password = "YOUR_MQTT_PASSWORD"  # alias of mqtt_password
+# client_id = ""                  # alias of MQTTClientID
+# qos = 1                         # alias of MQTTQoS
+# timeout = 15                    # alias of MQTTTimeoutSeconds
+# tls = false                     # alias of MQTTTLS
+# ca_certs = ""                   # alias of MQTTCAFile
+# certfile = ""                   # alias of MQTTCertFile
+# keyfile = ""                    # alias of MQTTKeyFile

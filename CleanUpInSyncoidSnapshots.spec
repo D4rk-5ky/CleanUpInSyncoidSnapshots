@@ -1,6 +1,5 @@
 # PyInstaller one-file build specification for CleanUpInSyncoidSnapshots.
-# Supporting code is imported from the modules package and bundled automatically.
-# Runtime JSON/TOML/input/certificate files remain external and are supplied by the user.
+# Runtime TOML/input/certificate files remain external and are supplied by the user.
 
 from PyInstaller.utils.hooks import collect_submodules
 

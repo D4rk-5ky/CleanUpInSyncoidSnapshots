@@ -7,8 +7,8 @@ config*
 !hostnames-example
 !mqtt-config-example.json
 !config-example.toml
-!config-example.json
-!config-legacy-example.toml
+!configs/
+!configs/config-example.toml
 
 logs/
 __pycache__/

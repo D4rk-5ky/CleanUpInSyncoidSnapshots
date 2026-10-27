@@ -1,0 +1,686 @@
+{
+  "project": "CleanUpInSyncoidSnapshots",
+  "version": "0.0.20",
+  "preserved_executable_version": "0.0.16",
+  "verification_date": "2026-10-27",
+  "archive_root": "CleanUpInSyncoidSnapshots-0.0.20",
+  "original_archive": {
+    "filename": "CleanUpInSyncoidSnapshots-CleanUpInSyncoidSnapshots-Next.zip",
+    "sha256": "294c6c831c8c468d1eb2b9299928c73bb725a3429c571acc9d74bedf2393db9a",
+    "file_count": 22,
+    "source_version": "0.0.16"
+  },
+  "previous_archive": {
+    "filename": "CleanUpInSyncoidSnapshots-0.0.19.zip",
+    "sha256": "ba1e9ac487616cdbdad1136fd1c59dd60ae45ae17623e3daff1284a085d41c98",
+    "file_count": 28,
+    "version": "0.0.19"
+  },
+  "packaged_file_count": 29,
+  "relocations": [
+    {
+      "from": "config_loader.py",
+      "to": "modules/config_loader.py"
+    },
+    {
+      "from": "mqtt_notifications.py",
+      "to": "modules/mqtt_notifications.py"
+    },
+    {
+      "from": "mqtt_reporting.py",
+      "to": "modules/mqtt_reporting.py"
+    },
+    {
+      "from": "config.toml",
+      "to": "configs/config.toml"
+    },
+    {
+      "from": "config-example.toml",
+      "to": "configs/config-example.toml"
+    },
+    {
+      "from": "datasets-example",
+      "to": "configs/datasets-example"
+    },
+    {
+      "from": "hostnames-example",
+      "to": "configs/hostnames-example"
+    },
+    {
+      "from": "live-preview-card.yaml",
+      "to": "examples/live-preview-card.yaml"
+    },
+    {
+      "from": "success-failure-automation.yaml",
+      "to": "examples/success-failure-automation.yaml"
+    },
+    {
+      "from": "home-assistant/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml",
+      "to": "examples/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml"
+    }
+  ],
+  "original_comparison": {
+    "counts": {
+      "unchanged": 8,
+      "modified": 8,
+      "relocated_modified": 4,
+      "added": 7,
+      "relocated_unchanged": 2
+    },
+    "missing_source_paths": [],
+    "preserved_file_count": 22
+  },
+  "previous_comparison": {
+    "counts": {
+      "unchanged": 8,
+      "modified": 10,
+      "relocated_modified": 5,
+      "relocated_unchanged": 5,
+      "added": 1
+    },
+    "missing_source_paths": [],
+    "preserved_file_count": 28
+  },
+  "hash_note": "All source paths resolve through the explicit relocation map. Manifest self-hash/size omitted to avoid circular metadata; external ZIP SHA-256 covers this file.",
+  "permission_policy": "Preserve previous/original recorded Unix modes; 0644 for new data files and 0755 directories.",
+  "files": [
+    {
+      "path": ".github/CODEOWNERS",
+      "original": {
+        "source_path": ".github/CODEOWNERS",
+        "size": 11,
+        "sha256": "8e348ed87081e5c65b05319836db22ddf974567a46dc45ae0d8b91a404c4b1c5",
+        "recorded_unix_mode": null
+      },
+      "previous": {
+        "source_path": ".github/CODEOWNERS",
+        "size": 11,
+        "sha256": "8e348ed87081e5c65b05319836db22ddf974567a46dc45ae0d8b91a404c4b1c5",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "unchanged",
+      "status_vs_previous": "unchanged",
+      "release": {
+        "size": 11,
+        "sha256": "8e348ed87081e5c65b05319836db22ddf974567a46dc45ae0d8b91a404c4b1c5",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": ".gitignore",
+      "original": {
+        "source_path": ".gitignore",
+        "size": 323,
+        "sha256": "c718a5f195bc7b3ad4767a2f56ed2809e6dd4252de3e1e7d89ca057bed8f1252",
+        "recorded_unix_mode": null
+      },
+      "previous": {
+        "source_path": ".gitignore",
+        "size": 323,
+        "sha256": "c718a5f195bc7b3ad4767a2f56ed2809e6dd4252de3e1e7d89ca057bed8f1252",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "modified",
+      "status_vs_previous": "modified",
+      "release": {
+        "size": 362,
+        "sha256": "c0a849d9a71c9b7e7ee4f94c3b040d78763665c45c7155327b34de360702eb94",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "CleanUpInSyncoidSnapshots.py",
+      "original": {
+        "source_path": "CleanUpInSyncoidSnapshots.py",
+        "size": 34991,
+        "sha256": "87365b8de5cc0f698d05c872807d6ece64d4f9608d7675ba4cb3b5be111bcc85",
+        "recorded_unix_mode": 493
+      },
+      "previous": {
+        "source_path": "CleanUpInSyncoidSnapshots.py",
+        "size": 38457,
+        "sha256": "ece0893a18e2c819449784c194e6978339969ea653742691e644fbc110cbfba9",
+        "recorded_unix_mode": 493
+      },
+      "status_vs_original": "modified",
+      "status_vs_previous": "modified",
+      "release": {
+        "size": 38497,
+        "sha256": "244b491540c7c6e638e9812d13823b42b0f13bcc9cf589e6dfd75aaf0d7c5638",
+        "unix_mode": 493
+      }
+    },
+    {
+      "path": "CleanUpInSyncoidSnapshots.spec",
+      "original": {
+        "source_path": "CleanUpInSyncoidSnapshots.spec",
+        "size": 948,
+        "sha256": "e40fe64c2c0d72e6fbaa77e98d2c343d79ddf98582359a0ecac8b835d2f87409",
+        "recorded_unix_mode": null
+      },
+      "previous": {
+        "source_path": "CleanUpInSyncoidSnapshots.spec",
+        "size": 948,
+        "sha256": "e40fe64c2c0d72e6fbaa77e98d2c343d79ddf98582359a0ecac8b835d2f87409",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "unchanged",
+      "status_vs_previous": "unchanged",
+      "release": {
+        "size": 948,
+        "sha256": "e40fe64c2c0d72e6fbaa77e98d2c343d79ddf98582359a0ecac8b835d2f87409",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "DISCLAIMER.md",
+      "original": {
+        "source_path": "DISCLAIMER.md",
+        "size": 1634,
+        "sha256": "8d4d394f672efda9654d6bbae4fc031a2298e83928df9c4ec627401fb89a0e84",
+        "recorded_unix_mode": null
+      },
+      "previous": {
+        "source_path": "DISCLAIMER.md",
+        "size": 1634,
+        "sha256": "8d4d394f672efda9654d6bbae4fc031a2298e83928df9c4ec627401fb89a0e84",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "unchanged",
+      "status_vs_previous": "unchanged",
+      "release": {
+        "size": 1634,
+        "sha256": "8d4d394f672efda9654d6bbae4fc031a2298e83928df9c4ec627401fb89a0e84",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "PACKAGE_MANIFEST.json",
+      "original": {
+        "source_path": "PACKAGE_MANIFEST.json",
+        "size": 8755,
+        "sha256": "a35230090dccc505cec549abcb425dcf802588f06ee9a6b01e09d9b20169bcf4",
+        "recorded_unix_mode": null
+      },
+      "previous": {
+        "source_path": "PACKAGE_MANIFEST.json",
+        "size": 19981,
+        "sha256": "560c784a86350e31d6777954b0c3119b1667c14c422c574f5df76870f8888034",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "modified",
+      "status_vs_previous": "modified",
+      "release": {
+        "size": null,
+        "sha256": null,
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "README.md",
+      "original": {
+        "source_path": "README.md",
+        "size": 25554,
+        "sha256": "eabaec7c17f55c50f54cffbd110a456fc378628b99785bd5295508c5d6802276",
+        "recorded_unix_mode": null
+      },
+      "previous": {
+        "source_path": "README.md",
+        "size": 30287,
+        "sha256": "4aa78b25768b60cee4ab0ebac801b97ea770f5fb9ac27c2549213c57cf6d9377",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "modified",
+      "status_vs_previous": "modified",
+      "release": {
+        "size": 30988,
+        "sha256": "0c3807b774b43f09e63ed9a06c52dac028b1210733c2a558405e316c72f85604",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "VERIFICATION.md",
+      "original": {
+        "source_path": "VERIFICATION.md",
+        "size": 6945,
+        "sha256": "1fa3295c96a8423d0f8ba840ae501d4bf4b3b386025a0871aecc94d4f520bcb6",
+        "recorded_unix_mode": null
+      },
+      "previous": {
+        "source_path": "VERIFICATION.md",
+        "size": 5837,
+        "sha256": "80aef6fb14f2d4238a87366ac9741d5f1bedaded98a1522d93aa34ca52098f83",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "modified",
+      "status_vs_previous": "modified",
+      "release": {
+        "size": 6528,
+        "sha256": "a9f731066435717a80a7c7ca2c332f5d21cb24f8569c5b979d17e5c785e4d72c",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "VERSIONING.md",
+      "original": {
+        "source_path": "VERSIONING.md",
+        "size": 35487,
+        "sha256": "3a57fa166bd8b8d0c56237053a1578ba4a4efbcb4999dfa32ad2ddf79ce48423",
+        "recorded_unix_mode": null
+      },
+      "previous": {
+        "source_path": "VERSIONING.md",
+        "size": 45007,
+        "sha256": "c23300f740b998bc789acc889f88fb1a5428fb166813b60237553b3ac720f27a",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "modified",
+      "status_vs_previous": "modified",
+      "release": {
+        "size": 47415,
+        "sha256": "08c1d5d0f97afcc67cc60bbe548427be4eb89129aa5c0a9feeecb6c12a6bcd7e",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "build-pyinstaller.sh",
+      "original": {
+        "source_path": "build-pyinstaller.sh",
+        "size": 1370,
+        "sha256": "2c36da8432709fdcfd48df35c100f47abc3fadf47aeeb9af741f7f9eebbf6f96",
+        "recorded_unix_mode": 493
+      },
+      "previous": {
+        "source_path": "build-pyinstaller.sh",
+        "size": 1370,
+        "sha256": "2c36da8432709fdcfd48df35c100f47abc3fadf47aeeb9af741f7f9eebbf6f96",
+        "recorded_unix_mode": 493
+      },
+      "status_vs_original": "unchanged",
+      "status_vs_previous": "unchanged",
+      "release": {
+        "size": 1370,
+        "sha256": "2c36da8432709fdcfd48df35c100f47abc3fadf47aeeb9af741f7f9eebbf6f96",
+        "unix_mode": 493
+      }
+    },
+    {
+      "path": "commented_code_map.md",
+      "original": {
+        "source_path": "commented_code_map.md",
+        "size": 35208,
+        "sha256": "d51fac44d05418a6c7adf6ad13f2b23477e74b03d8a0dbbbf626c20066f1c04b",
+        "recorded_unix_mode": null
+      },
+      "previous": {
+        "source_path": "commented_code_map.md",
+        "size": 63426,
+        "sha256": "1d307ce50a4ca94b0db7f8800e2320cd7f16cb82392456623f0aa953281bd419",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "modified",
+      "status_vs_previous": "modified",
+      "release": {
+        "size": 65663,
+        "sha256": "4e80a231217a33220099326144ab895ffe3a7b8889ab92e588d22fdf7ad4485f",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "configs/config-example.toml",
+      "original": {
+        "source_path": "config-example.toml",
+        "size": 5156,
+        "sha256": "ba47b18b5ef601e9cc256d2046df3cef537826722672e901cff613856e3edc6f",
+        "recorded_unix_mode": null
+      },
+      "previous": {
+        "source_path": "config-example.toml",
+        "size": 8210,
+        "sha256": "69b9d0536365b9cd0c2ce5fe0d9c88c6c33e18e02b425bf7f6ca1775d331c902",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "relocated_modified",
+      "status_vs_previous": "relocated_modified",
+      "release": {
+        "size": 8298,
+        "sha256": "94e4c74869d6a20f94a25bc28d50753307a5fa6edc4ab44aad2ca6d7f9fc16d1",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "configs/config.toml",
+      "original": null,
+      "previous": {
+        "source_path": "config.toml",
+        "size": 8210,
+        "sha256": "69b9d0536365b9cd0c2ce5fe0d9c88c6c33e18e02b425bf7f6ca1775d331c902",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "added",
+      "status_vs_previous": "relocated_modified",
+      "release": {
+        "size": 8298,
+        "sha256": "94e4c74869d6a20f94a25bc28d50753307a5fa6edc4ab44aad2ca6d7f9fc16d1",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "configs/datasets-example",
+      "original": {
+        "source_path": "datasets-example",
+        "size": 1054,
+        "sha256": "afeaec89f456aaf097fae94940d327a56cdabd5ade8b8c5908dc6fcb29a036ce",
+        "recorded_unix_mode": null
+      },
+      "previous": {
+        "source_path": "datasets-example",
+        "size": 1054,
+        "sha256": "afeaec89f456aaf097fae94940d327a56cdabd5ade8b8c5908dc6fcb29a036ce",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "relocated_unchanged",
+      "status_vs_previous": "relocated_unchanged",
+      "release": {
+        "size": 1054,
+        "sha256": "afeaec89f456aaf097fae94940d327a56cdabd5ade8b8c5908dc6fcb29a036ce",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "configs/hostnames-example",
+      "original": {
+        "source_path": "hostnames-example",
+        "size": 19,
+        "sha256": "00d17509cb7ac0f28cc8eb032d7bd43f95fcfdbe32218aeab70fd1632d65b145",
+        "recorded_unix_mode": null
+      },
+      "previous": {
+        "source_path": "hostnames-example",
+        "size": 19,
+        "sha256": "00d17509cb7ac0f28cc8eb032d7bd43f95fcfdbe32218aeab70fd1632d65b145",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "relocated_unchanged",
+      "status_vs_previous": "relocated_unchanged",
+      "release": {
+        "size": 19,
+        "sha256": "00d17509cb7ac0f28cc8eb032d7bd43f95fcfdbe32218aeab70fd1632d65b145",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "dist/CleanUpInSyncoidSnapshots",
+      "original": {
+        "source_path": "dist/CleanUpInSyncoidSnapshots",
+        "size": 12292528,
+        "sha256": "e4b450b7ad507dde5d10a733de620dfd80867fe32eb9677ec55f40d2fb9647b7",
+        "recorded_unix_mode": 493
+      },
+      "previous": {
+        "source_path": "dist/CleanUpInSyncoidSnapshots",
+        "size": 12292528,
+        "sha256": "e4b450b7ad507dde5d10a733de620dfd80867fe32eb9677ec55f40d2fb9647b7",
+        "recorded_unix_mode": 493
+      },
+      "status_vs_original": "unchanged",
+      "status_vs_previous": "unchanged",
+      "release": {
+        "size": 12292528,
+        "sha256": "e4b450b7ad507dde5d10a733de620dfd80867fe32eb9677ec55f40d2fb9647b7",
+        "unix_mode": 493
+      }
+    },
+    {
+      "path": "examples/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml",
+      "original": {
+        "source_path": "home-assistant/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml",
+        "size": 7176,
+        "sha256": "625cc542dce00dec2fc7fb2f4b0ca7f7c4d98ecd0a20dc662db2975878f5c1ab",
+        "recorded_unix_mode": null
+      },
+      "previous": {
+        "source_path": "home-assistant/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml",
+        "size": 7179,
+        "sha256": "caf4259aa6c9f16527a0ff68a713b5e38391ecd9bb11b4105d933d141da46f50",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "relocated_modified",
+      "status_vs_previous": "relocated_unchanged",
+      "release": {
+        "size": 7179,
+        "sha256": "caf4259aa6c9f16527a0ff68a713b5e38391ecd9bb11b4105d933d141da46f50",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "examples/live-preview-card.yaml",
+      "original": null,
+      "previous": {
+        "source_path": "live-preview-card.yaml",
+        "size": 10059,
+        "sha256": "8056fb882bf376eae349ec4a3bf3c8d57d944158adce3a9b77cd34670b1f7287",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "added",
+      "status_vs_previous": "relocated_unchanged",
+      "release": {
+        "size": 10059,
+        "sha256": "8056fb882bf376eae349ec4a3bf3c8d57d944158adce3a9b77cd34670b1f7287",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "examples/success-failure-automation.yaml",
+      "original": null,
+      "previous": {
+        "source_path": "success-failure-automation.yaml",
+        "size": 3671,
+        "sha256": "c3c6d834f56d76c4cd973b6415276066acafd144db1fad34cbdf220b4c4ba98f",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "added",
+      "status_vs_previous": "relocated_unchanged",
+      "release": {
+        "size": 3671,
+        "sha256": "c3c6d834f56d76c4cd973b6415276066acafd144db1fad34cbdf220b4c4ba98f",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "modules/__init__.py",
+      "original": null,
+      "previous": null,
+      "status_vs_original": "added",
+      "status_vs_previous": "added",
+      "release": {
+        "size": 75,
+        "sha256": "e2955bf58d86c7f42997d7d94d0909b5cfd9d609a4eb228c24630e7439be1be1",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "modules/config_loader.py",
+      "original": {
+        "source_path": "config_loader.py",
+        "size": 7942,
+        "sha256": "15c418f121d2dde996f57e803657fb633be45b7167f9760d9fb2a32508091d9c",
+        "recorded_unix_mode": null
+      },
+      "previous": {
+        "source_path": "config_loader.py",
+        "size": 8065,
+        "sha256": "a4df5f8fe6b278d61d156ab9b524b71327f0a1fad3f24987b0d9dfe5a5b41a88",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "relocated_modified",
+      "status_vs_previous": "relocated_modified",
+      "release": {
+        "size": 8066,
+        "sha256": "4c04aca776b95421ce105a2c1a35c0c074c8588499a9796e97761110403b8587",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "modules/mqtt_notifications.py",
+      "original": {
+        "source_path": "mqtt_notifications.py",
+        "size": 8282,
+        "sha256": "87d90b0665f9189f7d05fb0ba2ef567583cf822794d28cef54facd50ce647b00",
+        "recorded_unix_mode": null
+      },
+      "previous": {
+        "source_path": "mqtt_notifications.py",
+        "size": 8777,
+        "sha256": "befc3735c9f5cbc56dca7ddb66b1d703d314182289ca1bdf2a8aba7894dc6660",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "relocated_modified",
+      "status_vs_previous": "relocated_modified",
+      "release": {
+        "size": 8778,
+        "sha256": "f88e57ec6c8f2ba061444550f1bbd06b1a8687358c9a9316901be53e7afa5893",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "modules/mqtt_reporting.py",
+      "original": null,
+      "previous": {
+        "source_path": "mqtt_reporting.py",
+        "size": 43545,
+        "sha256": "5b62ca9eea7e03942bfd6e2bb225802b1f3618a5bb879b6e2692fcbb9f16f7c1",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "added",
+      "status_vs_previous": "relocated_modified",
+      "release": {
+        "size": 43761,
+        "sha256": "259ab3d36aa35455abd3eba43822a7bcb1bb297071710e78b1ee00761f832bce",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "requirements-build.txt",
+      "original": {
+        "source_path": "requirements-build.txt",
+        "size": 274,
+        "sha256": "8b806fd2e81f69538c070be754632cffbd942135d30138ec81bd0f5bda39d57e",
+        "recorded_unix_mode": null
+      },
+      "previous": {
+        "source_path": "requirements-build.txt",
+        "size": 274,
+        "sha256": "8b806fd2e81f69538c070be754632cffbd942135d30138ec81bd0f5bda39d57e",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "unchanged",
+      "status_vs_previous": "unchanged",
+      "release": {
+        "size": 274,
+        "sha256": "8b806fd2e81f69538c070be754632cffbd942135d30138ec81bd0f5bda39d57e",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "requirements-mqtt.txt",
+      "original": {
+        "source_path": "requirements-mqtt.txt",
+        "size": 140,
+        "sha256": "e9712475edb341c4595620756ae5dcd1515e9501cf8b006864ad30b50988ee84",
+        "recorded_unix_mode": null
+      },
+      "previous": {
+        "source_path": "requirements-mqtt.txt",
+        "size": 140,
+        "sha256": "e9712475edb341c4595620756ae5dcd1515e9501cf8b006864ad30b50988ee84",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "unchanged",
+      "status_vs_previous": "unchanged",
+      "release": {
+        "size": 140,
+        "sha256": "e9712475edb341c4595620756ae5dcd1515e9501cf8b006864ad30b50988ee84",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "requirements.txt",
+      "original": {
+        "source_path": "requirements.txt",
+        "size": 124,
+        "sha256": "93cd68b15bf49a279295513ab41af0c0dd611d264c28e26383f21c6195208721",
+        "recorded_unix_mode": null
+      },
+      "previous": {
+        "source_path": "requirements.txt",
+        "size": 124,
+        "sha256": "93cd68b15bf49a279295513ab41af0c0dd611d264c28e26383f21c6195208721",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "unchanged",
+      "status_vs_previous": "unchanged",
+      "release": {
+        "size": 124,
+        "sha256": "93cd68b15bf49a279295513ab41af0c0dd611d264c28e26383f21c6195208721",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "tests/test_mqtt_reporting.py",
+      "original": null,
+      "previous": {
+        "source_path": "tests/test_mqtt_reporting.py",
+        "size": 56019,
+        "sha256": "3483dc87007f705e44ac29f73a7d912417b9dd90c31a828212b675feb0772c23",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "added",
+      "status_vs_previous": "modified",
+      "release": {
+        "size": 61061,
+        "sha256": "3deb59d22608200a5d626dcda6949cb8ac37c8dc8a160896df5e812c53fb937a",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "tests/test_project.py",
+      "original": {
+        "source_path": "tests/test_project.py",
+        "size": 53982,
+        "sha256": "f28ae8a42e25acb532e43681ee5b39702e9fa2c80bf955ab76b43d437a723e9a",
+        "recorded_unix_mode": null
+      },
+      "previous": {
+        "source_path": "tests/test_project.py",
+        "size": 54377,
+        "sha256": "fc6ba003594fdcc1043359fb07a1408be89ad458cd7d78ed6866ad7396367d79",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "modified",
+      "status_vs_previous": "modified",
+      "release": {
+        "size": 54429,
+        "sha256": "0da220879af5d650ed8376a332acf318370856f1e07661ccd2825d756e27ada8",
+        "unix_mode": 420
+      }
+    },
+    {
+      "path": "versioning.md",
+      "original": null,
+      "previous": {
+        "source_path": "versioning.md",
+        "size": 45007,
+        "sha256": "c23300f740b998bc789acc889f88fb1a5428fb166813b60237553b3ac720f27a",
+        "recorded_unix_mode": 420
+      },
+      "status_vs_original": "added",
+      "status_vs_previous": "modified",
+      "release": {
+        "size": 47415,
+        "sha256": "08c1d5d0f97afcc67cc60bbe548427be4eb89129aa5c0a9feeecb6c12a6bcd7e",
+        "unix_mode": 420
+      }
+    }
+  ]
+}

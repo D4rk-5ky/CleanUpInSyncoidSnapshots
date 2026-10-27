@@ -1,1 +1,1 @@
-"""Supporting modules for CleanUpInSyncoidSnapshots."""
+"""Shared configuration and MQTT modules for CleanUpInSyncoidSnapshots."""
