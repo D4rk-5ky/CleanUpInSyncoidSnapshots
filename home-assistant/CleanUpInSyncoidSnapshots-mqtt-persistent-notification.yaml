@@ -10,7 +10,7 @@ blueprint:
     mqtt_topic:
       name: MQTT status topic
       description: >-
-        Must exactly match mqtt.topic in the TOML configuration on the
+        Must exactly match completion.topic (or legacy mqtt.topic) in the configuration on the
         CleanUpInSyncoidSnapshots host.
       default: homeassistant/CleanUpInSyncoidSnapshots/Zotac-RI531/status
       selector:
@@ -38,8 +38,8 @@ blueprint:
       name: Notify on dry-run reports
       description: >-
         Allow notifications for dry-run reports. Successful dry-runs are only
-        published when mqtt.on_success=true; failed dry-runs are still published
-        whenever MQTT is enabled.
+        published when completion.on_success=true. Both outcomes also require
+        completion.send_on_dry_run=true.
       default: true
       selector:
         boolean:
@@ -70,7 +70,18 @@ conditions:
       {{ trigger.payload_json is defined
          and trigger.payload_json is mapping
          and trigger.payload_json.get('name') == 'CleanUpInSyncoidSnapshots'
-         and trigger.payload_json.get('status') in ['success', 'failure'] }}
+         and trigger.payload_json.get('schema_version') is integer
+         and trigger.payload_json.get('schema_version') == 1
+         and trigger.payload_json.get('exit_code') is integer
+         and trigger.payload_json.get('success') is boolean
+         and trigger.payload_json.get('warning') is boolean
+         and trigger.payload_json.get('dry_run') is boolean
+         and ((trigger.payload_json.get('status') == 'success'
+               and trigger.payload_json.get('success') == true
+               and trigger.payload_json.get('exit_code') == 0)
+              or (trigger.payload_json.get('status') == 'failure'
+                  and trigger.payload_json.get('success') == false
+                  and trigger.payload_json.get('exit_code') != 0)) }}
 
 actions:
   - variables:

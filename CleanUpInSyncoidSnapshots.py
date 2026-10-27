@@ -6,10 +6,13 @@ import logging
 import subprocess
 import argparse
 import glob
+import fcntl
 import sys
 from typing import List, Tuple, Optional
-from config_loader import load_config, parse_older_than
-from mqtt_notifications import build_mqtt_report, notify_mqtt, publish_worker, should_send_notification
+from modules.config_loader import load_config, parse_older_than
+from modules.mqtt_notifications import build_mqtt_report, notify_mqtt, publish_worker, should_send_notification
+from modules.mqtt_status import run_worker_if_requested as completion_worker
+from modules.ha_live_preview import LivePreview, run_worker_if_requested as live_worker
 
 
 __version__ = "0.0.16"
@@ -167,6 +170,7 @@ def run_cmd(
     check: bool = True,
     log_stdout: bool = True,
     log_stderr: bool = True,
+    progress=None,
 ):
     """
     Run a system command with robust logging.
@@ -187,6 +191,8 @@ def run_cmd(
 
     stdout = (proc.stdout or "").strip()
     stderr = (proc.stderr or "").strip()
+    if progress is not None and stderr:
+        progress.append_stderr(stderr + "\n")
 
     if proc.returncode == 0:
         if logger and log_stdout and stdout:
@@ -285,8 +291,8 @@ def build_backup_mail_header(backup_title: str = "", backup_comment: str = "") -
     """
     Build the optional text block that is written at the very top of notification emails.
 
-    The title also names the run in the email subject; the full title/comment
-    remain in the body, while the existing SUCCESS/FAILED status is preserved.
+    The email subject still stays as SUCCESS/FAILED. These values are only written
+    into the body of the mail.
     """
     backup_title = (backup_title or "").strip()
     backup_comment = (backup_comment or "").strip()
@@ -340,12 +346,6 @@ def MailTo(
     if not body.strip():
         body = "No log content was found. Check the script output on the host.\n"
 
-    # Reuse report.title as the run name across MQTT, mail body and subject.
-    # TOML permits multiline titles for the body; subjects must remain one line.
-    run_name = " ".join((backup_title or "").split())
-    if run_name:
-        subject = f"[{run_name}] {subject}"
-
     mail_exit_code, stderr_output = send_mail(subject, body, recipient, attachment_files)
     WasMailSent(logger, error_logger, mail_exit_code, stderr_output)
 
@@ -389,6 +389,7 @@ def delete_syncoid_snapshots(
     older_than: Optional[datetime.timedelta],
     retain_count: int,
     dry_run: bool,
+    progress=None,
 ) -> dict:
     """Prune or preview one dataset and return counts for the final run report."""
     if not hostnames:
@@ -402,11 +403,14 @@ def delete_syncoid_snapshots(
         rf"^(?P<full>.+)@syncoid_(?P<host>{host_alt})_(?P<ts>\d{{4}}-\d{{2}}-\d{{2}}:\d{{2}}:\d{{2}}:\d{{2}}-GMT[+-]?\d{{2}}:\d{{2}})$"
     )
 
+    if progress is not None:
+        progress.update(phase="listing_snapshots", current_item=dataset)
     proc = run_cmd(
         ["zfs", "list", "-H", "-t", "snapshot", "-o", "name", dataset],
         logger=logger,
         error_logger=error_logger,
         check=True,
+        progress=progress,
     )
     lines = [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()]
     if not lines:
@@ -474,6 +478,9 @@ def delete_syncoid_snapshots(
             log_blank_line(logger)
         
         for snap_name in to_delete:
+            if progress is not None:
+                progress.update(phase="previewing_snapshots" if dry_run else "deleting_snapshots",
+                                current_item=snap_name)
             if dry_run:
                 logger.info(f"[DRY-RUN] Would delete syncoid snapshot: {snap_name}")
             else:
@@ -482,6 +489,7 @@ def delete_syncoid_snapshots(
                     logger=logger,
                     error_logger=error_logger,
                     check=True,
+                    progress=progress,
                 )
                 logger.info(f"[{dataset}] Deleted syncoid snapshot: {snap_name}")
 
@@ -598,6 +606,8 @@ def delete_old_files(
     }
 
 def main():
+    completion_worker()
+    live_worker()
     # PyInstaller's frozen MQTT notifier relaunches this executable with a private
     # environment marker. Credentials and report data remain on stdin, not argv.
     if os.environ.get("CLEANUP_SYNCOID_INTERNAL_MQTT_WORKER") == "1":
@@ -610,22 +620,13 @@ def main():
     default_script_name = script_base_name()
 
     # The application intentionally exposes one operational setting on the CLI:
-    # which TOML file to load. Standard -h/--help is available for discoverability;
-    # all cleanup, retention, mail, report, logging, and MQTT behavior lives in TOML.
+    # which JSON or TOML file to load. Standard -h/--help is available for discoverability;
+    # all cleanup, retention, mail, report, logging, and MQTT behavior lives in the config.
     parser = argparse.ArgumentParser(
-        # Keep help/version naming tied to the invoked app on Python 3.14+ too.
         prog=os.path.basename(sys.argv[0]),
-        description="Delete matching syncoid ZFS snapshots using one TOML configuration file.",
+        description="Delete matching syncoid ZFS snapshots using one JSON or TOML configuration file.",
         usage="%(prog)s -c CONFIG\n       %(prog)s --help\n       %(prog)s --version",
         epilog=(
-            "Modes (set cleanup.command in TOML):\n"
-            "  dry-run  Preview snapshot and old-log candidates; create local logs.\n"
-            "  delete   Destroy selected snapshots and prune eligible old logs.\n"
-            "Both modes require root. Enabled failure notifications can be sent in either mode;\n"
-            "success notifications require the channel's on_success=true.\n"
-            "Review a dry-run first. No age cutoff with retain_count=0 selects every matching snapshot.\n"
-            "Relative input/certificate paths are resolved beside the TOML file.\n"
-            "Run name: set report.title to label MQTT reports and email subjects.\n\n"
             "Examples:\n"
             "  %(prog)s -c config.toml\n"
             "  %(prog)s --config /etc/cleanup-syncoid/config.toml"
@@ -645,7 +646,7 @@ def main():
         metavar="CONFIG",
         required=False,
         help=(
-            "Path to the TOML configuration file. All cleanup, retention, continuation, "
+            "Path to the JSON or TOML configuration file. All cleanup, retention, continuation, "
             "logging, mail, report, and MQTT settings are read from this file."
         ),
     )
@@ -663,10 +664,25 @@ def main():
         parser.error(f"Cannot load configuration: {exc}")
 
     mqtt_config = args.mqtt_config
-    state = {}
+    live = LivePreview(args.live_config, name="CleanUpInSyncoidSnapshots",
+                       job=args.log_prefix, version=__version__, dry_run=args.dry_run)
+    state = {"live": live, "planned_datasets": [], "failed_datasets": [], "skipped_datasets": []}
+    live_lock = None
+    live_started = False
     exit_code = 0
     failure = None
     try:
+        # Serialize live writers sharing an identity within this installation.
+        # A rejected duplicate must never overwrite the active run's HA state.
+        if args.live_config.enabled and (not args.dry_run or args.live_config.send_on_dry_run):
+            lock_path = os.path.join(get_script_log_folder(), f".ha-live-{args.live_config.device_id}.lock")
+            live_lock = open(lock_path, "a", encoding="utf-8")
+            try:
+                fcntl.flock(live_lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise RuntimeError("Another cleanup is already using this HA live device identity") from None
+        live.start()
+        live_started = True
         run_cleanup(args, state)
     except SystemExit as exc:
         exit_code = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
@@ -681,27 +697,40 @@ def main():
         failure = exc
         raise
     finally:
-        # Report only after existing mail and log cleanup have finished.
-        if mqtt_config is not None:
-            report = build_mqtt_report(
-                args,
-                __version__,
-                exit_code,
-                failure,
-                state.get("warning", False),
-                state.get("dry_run_report"),
-            )
-            report_success = report.get("status") == "success"
-            if should_send_notification(report_success, mqtt_config["on_success"]):
-                notify_mqtt(mqtt_config, report, state.get("error_logger"))
-        warning_handler = state.get("warning_handler")
-        if warning_handler:
-            state["error_logger"].removeHandler(warning_handler)
-            warning_handler.close()
+        # Both channels report the cleanup result after mail and log retention.
+        # Live transport failures never decide whether completion is published.
+        try:
+            stderr_text = live.snapshot()["stderr"]
+            if not stderr_text:
+                stderr_text = getattr(failure, "stderr", "") or getattr(failure, "stdout", "") or ""
+            if live_started:
+                live.finish(exit_code, error=str(failure) if failure is not None else "",
+                            stderr=stderr_text, warning=state.get("warning", False),
+                            interrupted=(exit_code == 130))
+            if mqtt_config is not None:
+                report = build_mqtt_report(
+                    args, __version__, exit_code, failure, state.get("warning", False),
+                    state.get("dry_run_report"), run_id=live.run_id, stderr_text=stderr_text,
+                    planned_datasets=state["planned_datasets"],
+                    failed_datasets=state["failed_datasets"],
+                    skipped_datasets=state["skipped_datasets"],
+                )
+                if should_send_notification(exit_code == 0, mqtt_config["on_success"]):
+                    notify_mqtt(mqtt_config, report, state.get("error_logger"))
+        finally:
+            live.close()
+            if live_lock is not None:
+                live_lock.close()
+            warning_handler = state.get("warning_handler")
+            if warning_handler:
+                state["error_logger"].removeHandler(warning_handler)
+                warning_handler.close()
+
 
 
 def run_cleanup(args, state):
     """Run cleanup and apply configured per-dataset continuation rules for ZFS failures."""
+    live = state.get("live")
     prefix = args.log_prefix
     retain_count = max(int(args.retain_count or 0), 0)
     older_than = args.older_than  # Optional[datetime.timedelta]
@@ -716,7 +745,7 @@ def run_cleanup(args, state):
 
     logger, error_logger, err_filepath = setup_logger(log_folder, log_date, prefix)
     state.update(error_logger=error_logger, err_filepath=err_filepath)
-    if args.mqtt_config:
+    if args.mqtt_config or (live is not None and live.config.enabled):
         warning_handler = ReportWarningHandler(state)
         error_logger.addHandler(warning_handler)
         state["warning_handler"] = warning_handler
@@ -771,6 +800,9 @@ def run_cleanup(args, state):
         with open(args.datasets_file, "r", encoding="utf-8") as file:
             datasets = [ln.strip() for ln in file.read().splitlines() if ln.strip()]
 
+        state["planned_datasets"] = [{"source": dataset} for dataset in datasets]
+        if live is not None:
+            live.update(total=len(datasets), completed=0, phase="reading_inputs")
         syncoid_hosts = read_hostnames(args.syncoid_hosts_file)
         if dry_run_report is not None:
             dry_run_report["datasets_configured"] = len(datasets)
@@ -780,7 +812,10 @@ def run_cleanup(args, state):
             logger.info("Starting snapshot deletion...")
             print_separator(logger)
 
-        for dataset in datasets:
+        for index, dataset in enumerate(datasets):
+            if live is not None:
+                live.update(current_item=dataset, phase="processing_dataset")
+            attempted_complete = False
             try:
                 dataset_report = delete_syncoid_snapshots(
                     logger,
@@ -790,16 +825,31 @@ def run_cleanup(args, state):
                     older_than,
                     retain_count,
                     dry_run,
+                    progress=live,
                 )
+                attempted_complete = True
+                if not syncoid_hosts:
+                    row = {"source": dataset, "reason": "No syncoid hostnames configured"}
+                    state.setdefault("skipped_datasets", []).append(row)
+                    if live is not None:
+                        live.record_dataset("skipped", **row)
+                elif live is not None:
+                    live.record_dataset("success", source=dataset)
                 if dry_run_report is not None:
                     dry_run_report["datasets_completed"] += 1
                     dry_run_report["snapshots_matched"] += dataset_report["matched"]
                     dry_run_report["snapshots_would_delete"] += dataset_report["selected"]
                     dry_run_report["datasets"].append(dataset_report)
             except CommandError as exc:
+                attempted_complete = True
                 missing = is_missing_dataset_error(exc)
                 kind = "missing" if missing else "other"
                 dataset_failures.append((dataset, kind, exc))
+                row = {"source": dataset, "reason": str(exc), "kind": kind,
+                       "exit_code": exc.returncode, "stderr": exc.stderr[-4000:]}
+                state.setdefault("failed_datasets", []).append(row)
+                if live is not None:
+                    live.record_dataset("failure", source=dataset, reason=str(exc))
                 if dry_run_report is not None:
                     dry_run_report["dataset_failures"] = len(dataset_failures)
                 dataset_failure = DatasetFailuresError(dataset_failures)
@@ -824,7 +874,17 @@ def run_cleanup(args, state):
                     error_logger.error(
                         f"[{dataset}] Continuation is disabled by {option}=false; stopping cleanup."
                     )
+                    for remaining in datasets[index + 1:]:
+                        row = {"source": remaining, "reason": "Not attempted after earlier dataset failure"}
+                        state.setdefault("skipped_datasets", []).append(row)
+                        if live is not None:
+                            live.record_dataset("skipped", **row)
                     raise dataset_failure from exc
+            finally:
+                # Completed counts attempted datasets, including failed attempts.
+                # Terminal success/failure is independent of percentage.
+                if live is not None and attempted_complete:
+                    live.update(completed=index + 1, current_item=dataset)
             print_separator(logger)
 
         print_separator(logger)
@@ -855,6 +915,8 @@ def run_cleanup(args, state):
         raise
 
     finally:
+        if live is not None:
+            live.update(phase="finalizing", current_item="")
         if dry_run_report is not None:
             dry_run_report["dataset_failures"] = len(dataset_failures)
             log_dry_run_report(logger, dry_run_report)
