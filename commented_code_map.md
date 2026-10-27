@@ -1,12 +1,12 @@
-# Commented code map — CleanUpInSyncoidSnapshots 0.0.16
+# Commented code map — CleanUpInSyncoidSnapshots 0.0.19
 
-This file explains the current implementation. It is not a version history; release changes belong in `VERSIONING.md`.
+This file explains the current 0.0.19 source implementation. Release changes belong in the synchronized `VERSIONING.md` and `versioning.md` files. The preserved `dist/CleanUpInSyncoidSnapshots` executable reports 0.0.16; run source for this release or build a disposable copy for a current executable.
 
 ## `CleanUpInSyncoidSnapshots.py`
 
 | Function/class | What it does and why |
 | --- | --- |
-| `ReportWarningHandler` | Logging handler used only when MQTT is enabled. It remembers that an ERROR-level message occurred so a run that still exits successfully can publish `warning: true`, even if log retention later deletes the original error file. |
+| `ReportWarningHandler` | Logging handler enabled for either completion MQTT or live preview. It remembers that an ERROR-level message occurred so a run that still exits successfully can publish `warning: true`, even if log retention later deletes the original error file. |
 | `ReportWarningHandler.__init__` | Stores the shared lifecycle state and configures the handler for ERROR and above. |
 | `ReportWarningHandler.emit` | Sets `state["warning"] = True`; it deliberately does not duplicate message output. |
 | `setup_logger` | Creates the main DEBUG-file/INFO-console logger and separate ERROR-file/ERROR-console logger, returning the error-file path for final empty-file cleanup. |
@@ -18,11 +18,11 @@ This file explains the current implementation. It is not a version history; rele
 | `CommandError.__init__` | Stores command diagnostics and builds the human-readable failure message. |
 | `DatasetFailuresError` | Represents one or more dataset-level checked ZFS failures for final reporting. It can combine explicit missing-dataset failures and other list/destroy failures without changing the existing MQTT schema. |
 | `DatasetFailuresError.__init__` | Stores each dataset/kind/`CommandError`, combines original stderr diagnostics, separates missing from other failures in the human-readable summary, and exposes combined `stderr` for MQTT. |
-| `is_missing_dataset_error` | Recognizes only ZFS command failures whose stderr explicitly contains `dataset does not exist`; `run_cleanup` uses that classification to choose the matching continuation option. |
-| `run_cmd` | Executes ZFS commands without a shell, captures stdout/stderr, logs details, and raises `CommandError` on checked nonzero exit. Keeping argv as a list avoids shell interpolation. |
+| `is_missing_dataset_error` | Recognizes checked ZFS list OR destroy failures whose stderr contains `dataset does not exist` (case-insensitive); `run_cleanup` uses that classification to choose the matching continuation option. |
+| `run_cmd` | Executes ZFS commands without a shell, captures stdout/stderr, logs details, and raises `CommandError` on checked nonzero exit. Keeping argv as a list avoids shell interpolation. Capture real stderr before the existing trimming/logging logic; mark CommandError diagnostics as captured to prevent duplication. |
 | `get_newest_files` | Finds the newest `.log` and `.err` files for the configured prefix so email can attach/read the current report files. |
 | `read_hostnames` | Reads exact Syncoid hostnames, ignoring blank lines and whole-line `#` comments. |
-| `send_mail` | Invokes the host `mail` command with subject and optional attachments placed before the recipient for broad mail/mailx compatibility. |
+| `send_mail` | Invokes the host `mail` command with subject and optional attachments placed before the recipient for broad mail/mailx compatibility. Observe its phase and actual stderr for the shared in-memory report, without changing mail outcome handling. |
 | `print_separator` | Writes a visual separator to normal or error logging for readable reports. |
 | `log_blank_line` | Adds a blank informational log line without repeating formatting code. |
 | `WasMailSent` | Logs whether the external mail command succeeded; mail failure itself remains nonfatal to the cleanup result. |
@@ -32,7 +32,7 @@ This file explains the current implementation. It is not a version history; rele
 | `delete_syncoid_snapshots` | Lists snapshots for one explicit dataset, matches only configured Syncoid hosts, sorts newest-first, applies retain/age protection, and previews or destroys selected snapshots one at a time. It returns the matched/selected counts so dry-run reporting reuses the actual selection logic. Checked list/destroy failures propagate to `run_cleanup`; a failed destroy stops further work inside that dataset before any configured outer-loop continuation. |
 | `log_dry_run_report` | Writes the final aggregate dry-run summary after snapshot selection and, on successful dry-runs, after old-log retention preview. The summary is written before optional success mail so the email body/attachment includes it. |
 | `delete_old_files` | Applies the existing shared retention policy to timestamp-paired `.log`/`.err` groups. It returns matched/selected group and selected-file counts for the final report; in dry-run it only reports candidates and never removes files. |
-| `main` | Public entry point. Before public argument parsing, a private frozen-worker environment marker can route a PyInstaller child process directly into `publish_worker`; report/config data still arrives on stdin. Normal invocations explicitly derive argparse `prog` from the invoked filename so help/version naming also stays consistent on Python 3.14+. Help explains both TOML modes, root, notification gating, relative paths, and the no-age/zero-retention deletion case. Normal invocations provide standard `-h/--help` and `--version`, accept equivalent `-c CONFIG` / `--config CONFIG`, reject old operational flags, load/validate TOML before cleanup, preserve exit/exception behavior, and build the final MQTT report after finalization. Before calling MQTT it applies the shared success/failure gate, so successful delete and dry-run runs with `mqtt.on_success=false` never enter the notifier. The help/version actions exit before config loading or destructive work. |
+| `main` | Public entry point. Before public argument parsing, a private frozen-worker environment marker can route a PyInstaller child process directly into `publish_worker`; report/config data still arrives on stdin. Normal invocations explicitly derive argparse `prog` from the invoked filename so help/version naming also stays consistent on Python 3.14+. Help explains both TOML modes, root, notification gating, relative paths, and the no-age/zero-retention deletion case. Normal invocations provide standard `-h/--help` and `--version`, accept equivalent `-c CONFIG` / `--config CONFIG`, reject old operational flags, load/validate TOML before cleanup, preserve exit/exception behavior, and build the final MQTT report after finalization. Before calling MQTT it applies the shared success/failure gate, so successful delete and dry-run runs with `mqtt.on_success=false` never enter the notifier. The help/version actions exit before config loading or destructive work. A second private hook handles live workers. Bind RunReporting around the existing lifecycle, preserve the actual outcome/interrupt code, finalize live independently, and protect completion construction/delivery from replacing the job outcome. |
 | `run_cleanup` | Cleanup lifecycle reused by the TOML interface: logger setup, root guard, input-file loading, dry-run/delete processing, optional mail, log retention, and empty `.err` cleanup. It aggregates dry-run snapshot counts, previews old-log retention before the final dry-run report on successful previews, applies identical mail success gating to delete and dry-run, and logs `Success mail report suppressed by mail.on_success=false.` on either successful mode when mail is enabled but success reporting is disabled. It records/classifies dataset failures, applies continuation settings, and prunes old logs destructively only after a successful delete run. |
 | Imported `parse_older_than` | Re-exported from `config_loader.py` so existing callers/tests can still use `CleanUpInSyncoidSnapshots.parse_older_than` while parsing logic lives with configuration validation. |
 
@@ -48,7 +48,7 @@ This file explains the current implementation. It is not a version history; rele
 | `_optional_string` | Validates optional string settings such as report text and log prefix while allowing empty values. |
 | `_boolean` | Requires real TOML booleans rather than accepting integer lookalikes. |
 | `_resolve_config_relative` | Expands `~` and resolves relative paths against the TOML file directory so service/cron current working directory does not change which input/certificate file is used. |
-| `load_config` | Opens TOML with `tomllib`/`tomli`, validates all application sections, converts age/defaults, defaults both continuation switches to `true`, maps mail `on_success`, validates enabled MQTT settings including MQTT `on_success`, and returns the runtime namespace before any ZFS work. |
+| `load_config` | Opens TOML with `tomllib`/`tomli`, validates all application sections, converts age/defaults, defaults both continuation switches to `true`, maps mail `on_success`, validates enabled MQTT settings including MQTT `on_success`, and calls configure_reporting for canonical/legacy MQTT aliases plus independent live settings before returning the runtime namespace. The friendly MQTT name uses report.title, then LiveBackupName, then the application name. No non-MQTT setting is remapped. |
 | `tomllib` / `tomli` import fallback | Python 3.11+ uses the standard library; Python 3.10 falls back to the dependency in `requirements.txt` to preserve the project's prior Python 3.10 minimum. |
 
 ## `mqtt_notifications.py`
@@ -58,9 +58,9 @@ This file explains the current implementation. It is not a version history; rele
 | `DEFAULTS` | MQTT defaults for port, credentials, client ID, QoS, timeout, TLS paths, and success publishing (`on_success=false`). |
 | `should_send_notification` | Single shared notification-policy helper used by both the main mail lifecycle and MQTT lifecycle. It returns true for every failure, and for success only when the channel's `on_success=true`, preventing dry-run from having a separate success rule. |
 | `validate_mqtt_config` | Validates the enabled `[mqtt]` TOML settings, rejects unknown/wrong types and wildcard publish topics, normalizes empty optional strings to absent values, enforces username/password and certificate/key relationships, and resolves certificate files relative to the TOML directory. |
-| `build_mqtt_report` | Uses the configured run name (`report.title`) in JSON `title`, with application-name fallback when blank. Keeps `name` fixed for blueprint identification and `job` as the log prefix. Produces the Home Assistant-facing JSON schema using cleanup result, report metadata, warning state, command, version, and bounded command diagnostics. Dry-run payloads additionally receive the aggregate `dry_run_report` object supplied by the cleanup lifecycle. |
+| `build_mqtt_report` | Uses the configured run name (`report.title`) in JSON `title`, with application-name fallback when blank. Sets both `name` and `title` to the friendly name, keeps `job` as the stable log prefix, and identifies this application by `job_type`. Produces the Home Assistant-facing JSON schema using cleanup result, report metadata, warning state, command, version, and typed `success`/`exit_code`/warning/dry-run fields, shared run identity and latest 4,000 characters of actual stderr (never stdout or fabricated log text). Failed datasets carry original child exit codes only as an optional project extension. Dry-run payloads additionally receive the aggregate `dry_run_report` object supplied by the cleanup lifecycle. |
 | `_run_publisher` | Starts the publisher in a new Linux session with stdin and captured output pipes. `communicate` enforces the configured timeout. On timeout or interruption, `os.killpg(..., SIGKILL)` terminates that isolated process group, including PyInstaller bootloader descendants, before draining pipes and reaping the launcher. It returns a `CompletedProcess` to preserve the caller's nonfatal-delivery policy. |
-| `notify_mqtt` | Defensive MQTT notification wrapper. It re-applies `should_send_notification` so a successful report with `mqtt.on_success=false` cannot launch the publisher even if a caller bypasses the main lifecycle gate. In source mode it starts `mqtt_notifications.py --publish`; in a PyInstaller build it relaunches the same frozen executable with a private environment marker. Both forms use `_run_publisher` to pass config/report on stdin, enforce the hard timeout for the entire isolated publisher process group, keep credentials off argv, and leave cleanup outcome unchanged if publishing fails. |
+| `notify_mqtt` | Defensive MQTT notification wrapper. It applies the independent `send_on_dry_run` gate and re-applies `should_send_notification` so a successful report with `mqtt.on_success=false` cannot launch the publisher even if a caller bypasses the main lifecycle gate. In source mode it starts `mqtt_notifications.py --publish`; in a PyInstaller build it relaunches the same frozen executable with a private environment marker. Both forms use `_run_publisher` to pass config/report on stdin, enforce the hard timeout for the entire isolated publisher process group, keep credentials off argv, and leave cleanup outcome unchanged if publishing fails. |
 | `publish_worker` | Internal Paho one-shot MQTT 3.1.1 publisher. Builds auth/TLS context, publishes with configured QoS, and always uses `retain=False`. |
 | `if __name__ == "__main__"` worker gate | Accepts only the internal `--publish` argument. This is not a public application option; normal users run `CleanUpInSyncoidSnapshots.py -c CONFIG`. Unexpected worker arguments exit immediately. |
 
@@ -111,7 +111,7 @@ This file explains the current implementation. It is not a version history; rele
 | `test_success_schema_and_types` | Protects MQTT success status/type contract and JSON serializability. |
 | `test_dry_run_report_summary_is_included_in_mqtt_payload` | Confirms the aggregate dry-run summary is preserved in published MQTT JSON. |
 | `test_failure_command_diagnostics` | Confirms command failures include useful bounded stderr. |
-| `test_fallback_title_and_output_limit` | Confirms blank title fallback and 4096-character diagnostic bound. |
+| `test_fallback_title_and_output_limit` | Confirms blank title fallback and 4,000-character diagnostic bound. |
 | `test_shared_notification_gate` | Verifies the one shared truth table: failures always notify; successes notify only when `on_success=true`. |
 | `test_disabled_and_default_success_reports_do_not_launch_worker` | Confirms disabled MQTT and default-suppressed success reports for both delete and dry-run do not launch the publisher. |
 | `test_worker_input_and_timeout` | Confirms secrets are not placed on the worker command line and timeout is applied. |
@@ -212,18 +212,18 @@ This file explains the current implementation. It is not a version history; rele
 | `sudo python3 CleanUpInSyncoidSnapshots.py -c config.toml` | Public cleanup invocation using the short configuration selector. `-c` chooses the TOML file; every cleanup/retention/reporting setting comes from it. |
 | `sudo python3 CleanUpInSyncoidSnapshots.py --config config.toml` | Equivalent public cleanup invocation using the long configuration selector. |
 | `python3 CleanUpInSyncoidSnapshots.py -h` / `--help` | Displays the standard CLI help, every public flag, and examples, then exits before configuration loading, root checks, logging, or ZFS work. |
-| `python3 CleanUpInSyncoidSnapshots.py --version` | Prints `CleanUpInSyncoidSnapshots.py 0.0.16` and exits before configuration loading, logging, root checks, or ZFS work. |
+| `python3 CleanUpInSyncoidSnapshots.py --version` | Prints `CleanUpInSyncoidSnapshots.py 0.0.19` and exits before configuration loading, logging, root checks, or ZFS work. |
 | `sudo .venv/bin/python CleanUpInSyncoidSnapshots.py -c config.toml` | Same cleanup invocation when using the documented virtual environment. |
 | `zfs list -H -t snapshot -o name DATASET` | Lists snapshot names for one explicit dataset in machine-readable form; no recursive traversal is requested. Checked failures are recorded and the matching cleanup continuation setting decides whether the outer loop advances to the next dataset. |
-| `zfs destroy SNAPSHOT` | Deletes exactly one selected snapshot. No `-r`, force, wildcard, or shell expansion is used. A checked failure is classified as an “other” dataset failure; it stops work inside that dataset and the outer loop then follows `continue_on_other_failures`. |
+| `zfs destroy SNAPSHOT` | Deletes exactly one selected snapshot. No `-r`, force, wildcard, or shell expansion is used. A checked failure stops work inside that dataset. If stderr contains `dataset does not exist` (case-insensitive), the outer loop follows `continue_on_missing_dataset`; otherwise it follows `continue_on_other_failures`. Either category makes the final run fail. |
 | `mail -s SUBJECT [--attach FILE ...] RECIPIENT` | Optional external mail delivery using the current log/error files. |
 | `python -B mqtt_notifications.py --publish` | Internal timeout-isolated MQTT worker launched only by `notify_mqtt`; credentials/report arrive on stdin. `--publish` is not a public application flag. |
 | `python3 -m venv .venv` | Creates an isolated Python environment when desired. |
 | `.venv/bin/python -m pip install -r requirements.txt` | Installs `tomli` only when Python <3.11 requires it. |
 | `.venv/bin/python -m pip install -r requirements-mqtt.txt` | Installs base requirements plus optional Paho MQTT. |
-| `./build-pyinstaller.sh` | Recreates a clean `.venv-build`, removes prior `build/` and `dist/`, recreates `dist/` empty, installs `requirements-build.txt`, runs the one-file PyInstaller spec with explicit build/dist paths, fails unless `dist/` contains exactly one executable named `CleanUpInSyncoidSnapshots`, then smoke-tests that executable. |
+| `./build-pyinstaller.sh` | Run in a separate disposable project copy to retain the supplied executable. Recreates a clean `.venv-build`, removes prior `build/` and `dist/`, recreates `dist/` empty, installs `requirements-build.txt`, runs the one-file PyInstaller spec with explicit build/dist paths, fails unless `dist/` contains exactly one executable named `CleanUpInSyncoidSnapshots`, then smoke-tests that executable. |
 | `sudo ./dist/CleanUpInSyncoidSnapshots -c config.toml` | Runs the frozen one-file build. It accepts the same public CLI/config as source mode; Python, Paho and Tomli are bundled, while host `zfs` and optional `mail` remain external. |
-| `./dist/CleanUpInSyncoidSnapshots --help` / `--version` | Smoke-safe help/version actions on the frozen build. |
+| `./dist/CleanUpInSyncoidSnapshots --help` / `--version` | Smoke-safe help/version actions on the frozen build. The preserved supplied binary reports 0.0.16; a rebuild from current source reports 0.0.19. |
 | `cp config-example.toml config.toml` | Creates a local editable config from the complete reference. |
 | `chmod 600 config.toml` | Protects a config that may hold MQTT credentials and mail destinations. |
 | `python3 -B -m unittest discover -s tests -v` | Runs safe regression tests; ZFS/mail are mocked, and real MQTT tests use loopback only. |
@@ -234,20 +234,20 @@ This file explains the current implementation. It is not a version history; rele
 | --- | --- |
 | `CleanUpInSyncoidSnapshots.py` | Public application entry point and retained cleanup/email/log logic. |
 | `config_loader.py` | Single-TOML parsing and validation boundary before destructive work. |
-| `config-example.toml` | Complete commented reference for every supported runtime setting. |
+| `config-example.toml` | Identical to distributed `config.toml`; complete commented reference for every supported runtime setting. |
 | `mqtt_notifications.py` | Optional status-report validation and isolated publisher. |
 | `requirements.txt` | Python 3.10 TOML parser compatibility dependency. |
 | `requirements-mqtt.txt` | Optional Paho dependency plus base requirements. |
 | `requirements-build.txt` | PyInstaller build environment requirements: runtime MQTT dependency set, forced Tomli fallback, and PyInstaller itself. |
 | `CleanUpInSyncoidSnapshots.spec` | One-file PyInstaller definition. Explicit hidden-import collection includes all Paho and Tomli submodules; project/stdlib modules are discovered normally. |
 | `build-pyinstaller.sh` | Build helper that recreates the isolated build venv and leaves the final executable at `dist/CleanUpInSyncoidSnapshots`, then smoke-tests it. |
-| `dist/` | Generated final executable output directory. It is intentionally ignored by Git, recreated for builds, and included in the release ZIP with the current standalone executable. Runtime logs are created only when running cleanup. |
+| `dist/` | Generated final executable output directory. It is intentionally ignored by Git, recreated for builds, and included in this release ZIP with the preserved 0.0.16 executable. Source reports 0.0.19; rebuilding in a disposable copy replaces its binary. Runtime logs are created only when running cleanup. |
 | `datasets-example` | Original dataset-list example. |
 | `hostnames-example` | Original hostname-list example. |
 | `home-assistant/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml` | Receive-only example blueprint for final MQTT reports. |
 | `tests/test_project.py` | Regression and loopback integration tests. |
 | `README.md` | Current usage/configuration documentation only. |
-| `VERSIONING.md` | Release history and version policy. |
+| `VERSIONING.md`, `versioning.md` | Byte-identical complete release history and version policy; update both together to support either requested filename. |
 | `VERIFICATION.md` | Evidence and test limitations for the packaged release. |
 | `PACKAGE_MANIFEST.json` | Original-relative path comparison and SHA-256 hashes for the packaged files, plus unchanged/modified/added classifications. The manifest excludes its own hash to avoid a circular digest; ZIP integrity and the external archive checksum cover it. |
 | `DISCLAIMER.md` | Existing liability/data-loss warning. |
@@ -263,7 +263,7 @@ This file explains the current implementation. It is not a version history; rele
 - `zfs destroy` remains one snapshot at a time with checked failure handling.
 - Dataset-level checked ZFS failures always make the final result fail. The two explicit continuation settings only control whether the next configured dataset is attempted; setting either to `false` restores stop-immediately behavior for that category.
 - Mail and MQTT remain optional notification layers; neither can make snapshot-selection logic broader.
-- MQTT publishing stays in a separate timeout-bounded worker and remains non-retained.
+- Completion publishing stays in the existing timeout-bounded worker and remains non-retained. Live state/events are non-retained; only discovery and last real live result are retained.
 
 ## Build specification and shell commands
 
@@ -272,3 +272,186 @@ This file explains the current implementation. It is not a version history; rele
 `build-pyinstaller.sh` uses `cd` to select its own project directory, reads optional `PYTHON_BIN` and `VENV_DIR` overrides (defaults: `python3` and `.venv-build`), and removes the selected virtualenv, `build/`, and `dist/` with `rm -rf` before recreating output with `mkdir -p`. Supply a dedicated disposable build-venv path if overriding `VENV_DIR`. `python -m venv` creates isolation; `python -m pip install -r requirements-build.txt` installs the declared build dependencies. `pyinstaller --clean --noconfirm --distpath ... --workpath ... SPEC` clears its working cache, replaces output, and separates final output from build intermediates. `find` and `mapfile` enumerate every direct output entry, including hidden entries; shell count/path/regular-file/executable checks reject extra or invalid output. The executable's `--version` and `--help` smoke checks run before success is printed. `set -euo pipefail` aborts on failed commands, undefined variables, and pipeline errors.
 
 The Home Assistant blueprint's `trigger: mqtt` receives reports for one exact configured topic. Its template conditions validate the application/status and apply notification preferences. `persistent_notification.create` displays a report, optionally reusing `notification_id`; it performs no cleanup commands.
+
+
+## `mqtt_reporting.py` — completion contract and independent live preview
+
+The module docstring contains integration usage. The single adapter observes existing work; it neither selects new cleanup candidates nor issues ZFS, mail, scheduling or HA commands.
+
+| Symbol | What it does and why |
+| --- | --- |
+| `_text` | Require real strings and optional nonempty values so report fields keep a predictable JSON contract. |
+| `_json_text` | Validate native JSON types/finite numbers/string keys and encode UTF-8 without introducing a JSON file. |
+| `_json_text.check` | Recursively reject unsupported values and non-string object keys before encoding or publishing. |
+| `_dataset_list` | Detach optional dataset diagnostics supplied by actual dataset adapters; omitted diagnostics remain absent. |
+| `build_report` | Build typed completion JSON from the authoritative job exit code, cap actual stderr at 4,000 characters, include run/host/time identity, and allow optional extensions without replacing core fields. |
+| `encode_report` | Reject inconsistent status/success/exit code, non-boolean flags, invalid identity fields or malformed optional dataset arrays before compact JSON serialization. |
+| `_now` | Return a UTC ISO timestamp for live heartbeat and lifecycle events. |
+| `make_device_id` | Hash host, stable job and config path for a unique reproducible identity independent of friendly names or manufacturer. |
+| `LiveConfig` | Immutable live transport/discovery/event options; passwords are excluded from its repr. Defaults leave live delivery disabled. |
+| `LiveConfig.from_mapping` | Adapt supplied live option names and shared broker credentials independently of completion enablement; derive safe heartbeat expiry and device identity. |
+| `LiveConfig.from_mapping.certificate` | Expand a certificate path against the application TOML directory, preserving config-relative lookup. |
+| `LiveConfig.__post_init__` | Reject invalid live types, topic/device identities, booleans, timeouts, heartbeat/expiry relationships and TLS/auth combinations before workers can start. |
+| `LiveConfig.state_topic` | Return this device's non-retained live state topic, separate from completion notifications. |
+| `LiveConfig.result_topic` | Return this device's retained last-real-result topic for HA restarts or expired live sensors. |
+| `LiveConfig.events_topic` | Return a separate non-retained lifecycle-event topic; LiveNotify flags affect only these messages. |
+| `discovery_messages` | Build retained HA sensor discovery with configurable manufacturer, unique IDs, expiring non-retained state and non-expiring last result. Aggregate sensors carry stable role attributes so entity renames work. |
+| `LivePreview` | One run's thread-safe in-memory snapshot, outcome records and bounded asynchronous publisher; no job logic or local persistence lives here. |
+| `LivePreview.__init__` | Initialize nullable measurements and separate progress/outcome units. outcome_item_unit defaults to item_unit for generic callers; cleanup uses datasets for progress and snapshots for outcomes. |
+| `LivePreview._snapshot_locked` | Detach state under its lock and attach job_type, item_unit, outcome_item_unit, run/host identity, runtime and heartbeat without inferring unknown measurements. |
+| `LivePreview.snapshot` | Return local observed state for callers/tests; this is not proof of broker delivery. |
+| `LivePreview.last_delivery` | Return the last delivery attempt status separately from the actual job status. |
+| `LivePreview.start` | Start at most one daemon only when enabled and allowed for this dry-run; optionally queue a start event without blocking the job thread on networking. |
+| `LivePreview.update` | Validate and detach local updates, derive percent only from known positive totals, refresh outcome counts and wake the batching daemon. |
+| `LivePreview.record_item` | Record an item's latest success/failure/skipped outcome by name, preserving reasons/optional details without incrementing generic completed/total progress. |
+| `LivePreview.append_stderr` | Append actual supplied child stderr in memory, decoding bytes safely and keeping only the latest 4,000 characters. |
+| `LivePreview.finish` | Freeze runtime/outcome exactly once; explicitly label failure, interruption or incomplete work without forcing 100%, queue allowed terminal events and bound the final send wait. |
+| `LivePreview._cancel` | Stop the daemon and kill an active isolated publisher process group, including frozen bootloader descendants. |
+| `LivePreview.close` | Reap/cancel live networking with bounded waits; closing without finish does not invent an outcome, so running state expires honestly. |
+| `LivePreview._send` | Pass credentials and one message batch on worker stdin, isolate its process group, bound communication and kill/drain failed or timed-out workers without raising job errors. |
+| `LivePreview._worker` | Coalesce local changes and heartbeats, periodically republish discovery, send non-retained state/events, retain last real results only, and track delivery independently. |
+| `run_worker_if_requested` | Private source/frozen hook: read a batch from stdin, configure verified TLS/auth and call Paho multiple; unexpected publication errors return worker exit 1 without exposing secrets. |
+| `configure_reporting` | Normalize supplied option names over legacy aliases, reuse the existing MQTT transport validator, independently construct completion/live options, and reject completion/live topic collisions. Live-only configs do not require or validate an unused completion topic; a local validation sentinel is never published or persisted. |
+| `RunReporting` | Cleanup-specific observation adapter: one run ID, actual child stderr, snapshot decisions and optional dataset failures, all in memory. |
+| `RunReporting.__init__` | Initialize dataset progress with an unknown total until datasets_file is read, plus separate snapshot detail counters and the shared friendly name/job/run identity. |
+| `RunReporting.start` | Bind the current run context and begin optional live delivery; completion can remain disabled. |
+| `RunReporting.update` | Merge project details and compute processed datasets as successful dataset completions plus checked dataset failures. Set total directly from datasets_configured after file parsing, keeping progress independent of snapshot outcomes. |
+| `RunReporting.listed` | Accumulate matched snapshot names only; listing volume never changes dataset total or processed progress. |
+| `RunReporting.item` | Count a separate snapshots_processed detail and record the snapshot outcome/destruction counter; never advance main dataset progress. |
+| `RunReporting.selected` | Count the existing algorithm's selected deletion candidates before attempting them, including candidates in a dataset whose destroy later fails. |
+| `RunReporting.dataset_completed` | Increment successful dataset completions and synchronize processed progress; the existing cleanup return value and snapshot logic remain unchanged. |
+| `RunReporting.dataset_failure` | Keep actual dataset/command/code/stderr diagnostics, increment failed dataset attempts and processed progress without discarding the known file total; avoid duplicate stderr capture. |
+| `RunReporting.scan_complete` | Synchronize actual processed counts after the loop; never force completed to total or manufacture success. |
+| `RunReporting.capture` | Accumulate actual ZFS/mail stderr across child commands, unmodified except decoding/tail length; never use stdout or log messages as a substitute. |
+| `RunReporting.finish` | Finalize independent live state with actual code/error/warning and always close the daemon/reset the observation context. |
+| `observe` | Best-effort facade used at existing job boundaries; instrumentation errors cannot fail cleanup or replace its exit code. |
+
+| Constant/alias | Why it exists |
+| --- | --- |
+| `ALIASES`, `REPORTING_KEYS`, `LIVE_KEYS` | Keep accepted supplied/legacy settings explicit so unknown config options still fail before work. Canonical names win without duplicating independent channels. |
+| `_CURRENT` | Context-local in-memory observer avoids passing notification objects into every existing cleanup helper. |
+| `_json`, `STDERR_LIMIT`, `WORKER_FLAG` | Reuse one strict JSON encoder, one 4,000-character diagnostic limit, and one private worker command. |
+
+## `tests/test_mqtt_reporting.py`
+
+Template-derived live/card checks and project-specific integration checks use fake HA registries, captured local processes and ephemeral localhost MQTT fixtures. They never perform ZFS work or send Pushover/production mail. Every new helper/test is listed below.
+
+| Function/class | What it does and why |
+| --- | --- |
+| `wait_for` | Bound asynchronous test waits so stuck publisher threads/processes fail visibly. |
+| `LiveTests` | Group live  checks and their isolated fixtures. |
+| `LiveTests.live` | Supply the LiveTests live fixture/helper for isolated assertions without touching production services. |
+| `LiveTests.test_identity_is_stable_and_separates_configs_and_hosts` | Verify identity is stable and separates configs and hosts so the reporting/UI contract stays accurate. |
+| `LiveTests.test_config_validation_and_secret_repr` | Verify config validation and secret repr so the reporting/UI contract stays accurate. |
+| `LiveTests.test_manufacturer_is_configurable_in_discovery_and_state` | Verify manufacturer is configurable in discovery and state so the reporting/UI contract stays accurate. |
+| `LiveTests.test_invalid_manufacturer_names_are_rejected` | Verify invalid manufacturer names are rejected so the reporting/UI contract stays accurate. |
+| `LiveTests.test_aggregate_sensors_have_stable_role_markers` | Verify aggregate sensors have stable role markers so the reporting/UI contract stays accurate. |
+| `LiveTests.test_disabled_module_maintains_local_progress_without_processes` | Verify disabled module maintains local progress without processes so the reporting/UI contract stays accurate. |
+| `LiveTests.test_progress_is_derived_and_unknown_is_null` | Verify progress is derived and unknown is null so the reporting/UI contract stays accurate. |
+| `LiveTests.test_rejects_bad_counters_and_direct_status_updates` | Verify rejects bad counters and direct status updates so the reporting/UI contract stays accurate. |
+| `LiveTests.test_stderr_tail_and_utf8_replacement` | Verify stderr tail and utf8 replacement so the reporting/UI contract stays accurate. |
+| `LiveTests.test_completed_success_has_typed_code_and_shared_identity` | Verify completed success has typed code and shared identity so the reporting/UI contract stays accurate. |
+| `LiveTests.test_failure_and_interrupt_do_not_force_progress_to_100` | Verify failure and interrupt do not force progress to 100 so the reporting/UI contract stays accurate. |
+| `LiveTests.test_zero_code_with_remaining_work_is_incomplete` | Verify zero code with remaining work is incomplete so the reporting/UI contract stays accurate. |
+| `LiveTests.test_finish_is_idempotent_freezes_runtime_and_rejects_late_updates` | Verify finish is idempotent freezes runtime and rejects late updates so the reporting/UI contract stays accurate. |
+| `LiveTests.test_close_without_finish_does_not_invent_a_terminal_result` | Verify close without finish does not invent a terminal result so the reporting/UI contract stays accurate. |
+| `LiveTests.test_discovery_separates_expiring_state_and_retained_result` | Verify discovery separates expiring state and retained result so the reporting/UI contract stays accurate. |
+| `LiveTests.test_live_has_dataset_lists_and_counts` | Verify live has dataset lists and counts so the reporting/UI contract stays accurate. |
+| `LiveTests.test_dataset_retries_replace_previous_outcome_and_keep_reasons` | Verify dataset retries replace previous outcome and keep reasons so the reporting/UI contract stays accurate. |
+| `LiveTests.test_dataset_lists_and_snapshots_are_detached` | Verify dataset lists and snapshots are detached so the reporting/UI contract stays accurate. |
+| `LiveTests.test_failed_items_prevent_zero_code_live_success` | Verify failed items prevent zero code live success so the reporting/UI contract stays accurate. |
+| `LiveTests.test_dataset_input_validation_and_no_updates_after_finish` | Verify dataset input validation and no updates after finish so the reporting/UI contract stays accurate. |
+| `LiveTests.test_background_heartbeat_and_terminal_batch` | Verify background heartbeat and terminal batch so the reporting/UI contract stays accurate. |
+| `LiveTests.test_background_heartbeat_and_terminal_batch.send` | Supply the LiveTests test background heartbeat and terminal batch send fixture/helper for isolated assertions without touching production services. |
+| `LiveTests.test_updates_are_local_and_coalesced_while_network_is_slow` | Verify updates are local and coalesced while network is slow so the reporting/UI contract stays accurate. |
+| `LiveTests.test_updates_are_local_and_coalesced_while_network_is_slow.slow` | Supply the LiveTests test updates are local and coalesced while network is slow slow fixture/helper for isolated assertions without touching production services. |
+| `LiveTests.test_disabled_dry_run_does_not_start_worker` | Verify disabled dry run does not start worker so the reporting/UI contract stays accurate. |
+| `LiveTests.test_opted_in_dry_run_never_overwrites_retained_last_result` | Verify opted in dry run never overwrites retained last result so the reporting/UI contract stays accurate. |
+| `LiveTests.test_actual_worker_isolation_and_final_payload_with_fake_paho` | Verify actual worker isolation and final payload with fake paho so the reporting/UI contract stays accurate. |
+| `LiveTests.test_real_stalled_worker_is_killed_with_bounded_final_wait` | Verify real stalled worker is killed with bounded final wait so the reporting/UI contract stays accurate. |
+| `LiveTests.test_failed_delivery_does_not_change_job_outcome` | Verify failed delivery does not change job outcome so the reporting/UI contract stays accurate. |
+| `LiveTests.test_frozen_launch_and_tls_worker_hook` | Verify frozen launch and tls worker hook so the reporting/UI contract stays accurate. |
+| `LiveTests.test_module_imports_without_paho_and_uses_python310_syntax` | Verify module imports without paho and uses python310 syntax so the reporting/UI contract stays accurate. |
+| `Entity` | Represent a fake HA sensor with its device and attributes for offline card rendering. |
+| `FakeHA` | Provide an in-memory HA registry/state surface; no installed HA service is contacted. |
+| `FakeHA.__init__` | Supply the FakeHA   init   fixture/helper for isolated assertions without touching production services. |
+| `FakeHA.sensor` | Supply the FakeHA sensor fixture/helper for isolated assertions without touching production services. |
+| `FakeHA.__call__` | Supply the FakeHA   call   fixture/helper for isolated assertions without touching production services. |
+| `FakeHA.state_attr` | Supply the FakeHA state attr fixture/helper for isolated assertions without touching production services. |
+| `FakeHA.device_id` | Supply the FakeHA device id fixture/helper for isolated assertions without touching production services. |
+| `FakeHA.device_attr` | Supply the FakeHA device attr fixture/helper for isolated assertions without touching production services. |
+| `FakeHA.device_entities` | Supply the FakeHA device entities fixture/helper for isolated assertions without touching production services. |
+| `CardTests` | Group card checks and their isolated fixtures. |
+| `CardTests.setUp` | Supply the CardTests setUp fixture/helper for isolated assertions without touching production services. |
+| `CardTests.state` | Build actual module payloads for running, success, failure, incomplete, interrupted and unknown-measurement card scenarios. |
+| `CardTests.add` | Render actual discovery definitions into fake device sensors, including expired or renamed entities and retained prior results. |
+| `CardTests.render` | Render the actual Markdown card with HA-like registry helpers and optional manufacturer filtering. |
+| `CardTests.render.as_datetime` | Parse fixture timestamps with a safe default, matching the card's unavailable-time handling. |
+| `CardTests.test_yaml_wrapper_preserves_markdown_content` | Verify yaml wrapper preserves markdown content so the reporting/UI contract stays accurate. |
+| `CardTests.test_manufacturer_filter_and_custom_name` | Verify manufacturer filter and custom name so the reporting/UI contract stays accurate. |
+| `CardTests.test_devices_added_automatically_and_deduplicated` | Verify devices added automatically and deduplicated so the reporting/UI contract stays accurate. |
+| `CardTests.test_running_metrics_use_current_state_over_previous_result` | Verify running metrics use current state over previous result so the reporting/UI contract stays accurate. |
+| `CardTests.test_expired_terminal_state_uses_retained_result` | Verify expired terminal state uses retained result so the reporting/UI contract stays accurate. |
+| `CardTests.test_newer_run_with_lost_heartbeat_does_not_claim_old_success` | Verify newer run with lost heartbeat does not claim old success so the reporting/UI contract stays accurate. |
+| `CardTests.test_first_run_without_retained_result_is_visible` | Verify first run without retained result is visible so the reporting/UI contract stays accurate. |
+| `CardTests.test_incomplete_and_interrupted_are_explicit` | Verify incomplete and interrupted are explicit so the reporting/UI contract stays accurate. |
+| `CardTests.test_unknown_progress_stays_unknown` | Verify unknown progress stays unknown so the reporting/UI contract stays accurate. |
+| `CardTests.test_snapshot_results_and_stderr_are_formatted` | Verify snapshot results and stderr are formatted so the reporting/UI contract stays accurate. |
+| `CardTests.test_renamed_entities_use_role_markers` | Verify renamed entities use role markers so the reporting/UI contract stays accurate. |
+| `CardTests.test_empty_registry_shows_setup_instructions` | Verify empty registry shows setup instructions so the reporting/UI contract stays accurate. |
+| `IntegrationTests` | Real cleanup lifecycle with external ZFS/mail/MQTT effects intercepted. |
+| `IntegrationTests.run_job` | Run actual main/config/cleanup with real command/error/retention paths, intercept only ZFS subprocess results and MQTT delivery, and return captured live/completion outcomes. |
+| `IntegrationTests.run_job.command` | Supply deterministic ZFS list/destroy success, stderr, failure or interrupt; reject every other child command so tests cannot run destructive jobs. |
+| `IntegrationTests.run_job.publish` | Capture the real serialized completion report or simulate timeout without contacting any external broker. |
+| `IntegrationTests.run_job.adapter` | Retain the real RunReporting instance for assertions after lifecycle finalization. |
+| `IntegrationTests.test_success_has_typed_completion_and_honest_snapshot_counts` | Verify success has typed completion and honest snapshot counts so the reporting/UI contract stays accurate. |
+| `IntegrationTests.test_destroy_failure_preserves_job_code_child_code_and_actual_stderr_tail` | Verify destroy failure preserves job code child code and actual stderr tail so the reporting/UI contract stays accurate. |
+| `IntegrationTests.test_failed_listing_and_interrupt_never_invent_totals_or_success` | Verify failed listings retain the known dataset-file total and advance failed attempts, while interrupts keep the current entry unfinished and preserve the failure/interrupt result. |
+| `IntegrationTests.test_completion_and_live_are_independent_in_all_enablement_combinations` | Verify completion and live are independent in all enablement combinations so the reporting/UI contract stays accurate. |
+| `IntegrationTests.test_dry_run_skips_snapshot_destruction_and_preserves_last_real_result` | Verify dry run skips snapshot destruction and preserves last real result so the reporting/UI contract stays accurate. |
+| `IntegrationTests.test_broker_failures_never_replace_actual_success_or_failure` | Verify broker failures never replace actual success or failure so the reporting/UI contract stays accurate. |
+| `IntegrationTests.test_arbitrary_system_exit_is_preserved_even_when_reporting_raises` | Verify arbitrary system exit is preserved even when reporting raises so the reporting/UI contract stays accurate. |
+| `IntegrationTests.test_real_run_cmd_stderr_on_success_and_mail_stderr_are_captured_verbatim` | Verify real run cmd stderr on success and mail stderr are captured verbatim so the reporting/UI contract stays accurate. |
+| `IntegrationTests.test_canonical_options_legacy_aliases_and_non_mqtt_sections` | Verify canonical options legacy aliases and non mqtt sections so the reporting/UI contract stays accurate. |
+| `IntegrationTests.test_generic_completion_has_no_dataset_fields_and_rejects_inconsistent_types` | Verify generic completion has no dataset fields and rejects inconsistent types so the reporting/UI contract stays accurate. |
+| `IntegrationTests.test_no_new_application_commands_or_scheduling_and_worker_hook_is_private` | Verify no new application commands or scheduling and worker hook is private so the reporting/UI contract stays accurate. |
+| `AutomationTests` | Group automation checks and their isolated fixtures. |
+| `AutomationTests.setUp` | Supply the AutomationTests setUp fixture/helper for isolated assertions without touching production services. |
+| `AutomationTests.test_topic_guards_pushover_limits_and_actual_completion_payload` | Verify topic guards pushover limits and actual completion payload so the reporting/UI contract stays accurate. |
+| `AutomationTests.test_generic_card_hides_dataset_details_and_unmeasured_transfer` | Verify generic card hides dataset details and unmeasured transfer so the reporting/UI contract stays accurate. |
+| `LiveBrokerTests` | Group live broker checks and their isolated fixtures. |
+| `LiveBrokerTests.exchange` | Run real isolated Paho publishing against an ephemeral localhost listener and return wire messages; no production topic/broker receives anything. |
+| `LiveBrokerTests.exchange.serve` | Acknowledge local QoS-1 MQTT packets, capture JSON/retain flags or reject connections, with bounded thread shutdown. |
+| `LiveBrokerTests.test_real_paho_live_discovery_state_result_and_event_routing` | Verify real paho live discovery state result and event routing so the reporting/UI contract stays accurate. |
+| `LiveBrokerTests.test_real_live_broker_rejection_preserves_job_code` | Verify real live broker rejection preserves job code so the reporting/UI contract stays accurate. |
+
+## Added integration files and private command
+
+- `config.toml`: same complete safe example as `config-example.toml`, with original non-MQTT sections and completion topic preserved. All credentials are placeholders; both channels default disabled.
+- `live-preview-card.yaml`: Markdown `content: |` template; manufacturer discovery and stable roles choose actual live or retained result data. Dataset-file progress/current position and separate snapshot outcomes appear for this job; generic item units and null measurements remain meaningful for other jobs. Lost heartbeats never assert a new success.
+- `success-failure-automation.yaml`: completion-topic-only Pushover example. An early preview guard and typed/consistent result condition run before actions; title/message are bounded. No sequencing/scheduling action is introduced.
+- `python -B mqtt_reporting.py --ha-live-preview-worker`: internal stdin-fed live publisher only; the public application CLI is unchanged. Rebuilt frozen apps dispatch the same private flag before public parsing. The preserved 0.0.16 binary does not implement it.
+
+The existing receive-only persistent-notification blueprint now identifies the application by `job_type`, allowing friendly completion `name`/`title` values without losing its controls.
+
+## Independent-channel edge checks
+
+| Function/class | What it does and why |
+| --- | --- |
+| `IndependenceEdgeTests` | Protect independent channel, event and preview settings even with a minimal live-only config. |
+| `IndependenceEdgeTests.test_live_only_does_not_require_or_validate_a_completion_topic` | Load live-only settings with no completion topic and success notifications disabled; live needs only its own broker/topics. |
+| `IndependenceEdgeTests.test_live_event_and_discovery_switches_do_not_suppress_state_or_result` | Disable discovery and all events while verifying non-retained state and retained real results still publish for success/failure. |
+| `IndependenceEdgeTests.test_completion_dry_run_switch_never_suppresses_live_or_starts_its_worker` | Verify the completion-only preview gate prevents its worker without changing independent live settings. |
+
+
+## Dataset-file progress regressions
+
+| Function/class | What it verifies and why |
+| --- | --- |
+| `DatasetFileProgressTests` | Protect dataset-file progress independently of snapshot counts and actual job outcome. |
+| `DatasetFileProgressTests.run_job` | Reuse the existing intercepted real-lifecycle fixture so these tests execute no destructive commands. |
+| `DatasetFileProgressTests.test_five_entries_show_two_of_five_before_third_dataset_in_both_modes` | Read five nonblank entries and verify 2/5, 40%, current position 3/5 before the third dataset, in delete and dry-run modes even with no snapshots. |
+| `DatasetFileProgressTests.test_failed_entries_advance_position_without_becoming_successful` | All five failed dataset attempts reach 5/5 processed but remain failure, with zero successful dataset completions. |
+| `DatasetFileProgressTests.test_stopped_failure_and_midfile_interrupt_leave_remaining_entries_unprocessed` | Stop after one checked failure at 1/5, or interrupt the third entry at 2/5; never force remaining progress. |
+| `DatasetFileProgressTests.test_duplicate_entries_and_empty_file_use_exact_existing_input_rules` | Count repeated entries separately, ignore blank lines and keep zero-total percent unknown without changing the parser. |
+| `DatasetFileProgressTests.test_card_renders_dataset_ratio_and_separate_snapshot_outcomes` | Render the real Markdown card with renamed sensors and show dataset ratio/current position while outcome rows remain snapshots. |

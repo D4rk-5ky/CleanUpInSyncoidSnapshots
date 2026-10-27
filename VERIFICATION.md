@@ -1,116 +1,41 @@
-# Verification — CleanUpInSyncoidSnapshots 0.0.16
+# Verification — CleanUpInSyncoidSnapshots 0.0.19
 
-Date: 2026-10-26. New version: 0.0.15 → 0.0.16.
+Date: 2026-10-27. Previous source: 0.0.18; current source: 0.0.19 (one patch step).
 
-## Run name behavior
+## Change
 
-Reuse the existing setting, without adding a duplicate configuration option:
+Main live progress now follows the existing parsed datasets_file list. Its total is the number of nonempty entries, available immediately after reading the file. Blank lines are ignored and repeated entries count separately in file order, exactly as the existing cleanup parser processes them.
 
-```toml
-[report]
-title = "NAS nightly cleanup"
-comment = "After Syncoid replication"
-```
+`completed` counts finished dataset attempts: successful dataset returns plus checked dataset failures. `total` remains fixed even if a ZFS listing fails. Two finished entries in a five-entry file therefore report 2 / 5 and 40%. `details.current_dataset_index` shows the current one-based position, so the third running entry is position 3 / 5 while processed progress is still 2 / 5. An interruption leaves its current entry unfinished; stop-on-failure leaves later entries unprocessed.
 
-The configured name is included in MQTT JSON `title`, at the top of the email body, and now at the start of every email subject. For example:
+`item_unit` is datasets. Snapshot outcomes remain separate, labeled by the new `outcome_item_unit = snapshots`; snapshot matches, retention skips, invalid timestamps, dry-run decisions, failed destroys and successful destroys never advance dataset progress. Snapshot decision counts remain available as details.snapshots_processed. A failed job can legitimately reach 100% dataset progress when every entry was attempted; its job status/code remains failure. No finish call forces a percentage or counter. Before the input file can be read, total remains null; an empty file has total 0 and unknown percentage.
 
-```text
-[NAS nightly cleanup] Syncoid cleanup SUCCESS - logs attached
-[NAS nightly cleanup] Syncoid cleanup FAILED - logs attached
-[NAS nightly cleanup] Syncoid cleanup DRY-RUN SUCCESS - report/logs attached
-[NAS nightly cleanup] Syncoid cleanup DRY-RUN FAILED - report/logs attached
-[NAS nightly cleanup] Syncoid cleanup FAILED - not run as root
-```
+The updated Markdown card shows processed dataset ratio, current file position, successful/failed dataset results and separate snapshot outcome lists. Generic live adapters default outcome units to their progress unit; older payloads without outcome_item_unit fall back to item_unit. Discovery IDs, manufacturer/role markers, completion topic, delivery behavior, Pushover guards, input rules, ZFS arguments, retention, root enforcement, mail, continuation policy, job exit codes and scheduling are unchanged. No new runtime setting or project file is added.
 
-The shared `MailTo` function adds the prefix exactly once. It collapses title whitespace for a single-line subject; the email body and MQTT keep the existing stripped title text. Blank titles preserve existing email subjects and the MQTT application-name fallback. MQTT `name` remains the fixed application identifier and `job` remains the logging prefix, preserving Home Assistant's filtering contract.
+## Verification
 
-Notification enablement and success opt-in still control delivery. Configuring a title does not enable mail/MQTT or success notifications. Log filenames, MQTT topics, selection, retention, dry-run protection and root enforcement are unchanged.
+- Full regression suite: 137 tests passed, zero failures/skips, on Python 3.14.4 in 4.627 seconds. Existing localhost Paho completion/live tests, worker timeout tests and offline HA/Pushover renders remain passing. Cleanup commands and actual notifications are intercepted; real protocol tests use only temporary localhost brokers.
+- Five new regressions and one reused lifecycle helper cover the exact 2/5 state before the third entry in both delete/dry-run, continued failures, stopped failure at 1/5, interrupt at 2/5, duplicate/blank/empty input and actual card rendering with renamed sensors and separate snapshot outcomes.
+- Snapshot selection and ZFS command functions retain their 0.0.18 ASTs. Cleanup lifecycle differs only in observation placement and enumerating the same dataset list to observe its one-based position; normalizing those observations/index returns the original lifecycle AST.
+- Compile all six Python files and the PyInstaller spec with bytecode only in scratch. Verify source/preserved-executable help/version and safe invalid-argument/config cases (20 checks), Bash syntax, and four more help/version checks after fresh archive extraction.
+- All 257 functions/methods/nested helpers and all 24 classes are covered by commented_code_map.md. README/module/config comments describe current dataset progress. VERSIONING.md and versioning.md are byte-identical, with all earlier release entries preserved verbatim.
+- Both config examples are byte-identical and contain the same parsed values as 0.0.18, including all non-MQTT values, existing completion topic and disabled reporting defaults. All 61 supported keys remain represented, including optional/legacy examples in comments. No credential values are added.
+- README disclaimer sections and DISCLAIMER.md are preserved verbatim. The original standalone binary, build helper/spec, requirements, input examples and repository metadata retain their bytes. No integration JSON configuration/state/cache/log files are introduced.
 
-## Changes and preserved files
-
-- Increment application/version references to 0.0.16 and rebuild the standalone binary.
-- Extend `MailTo` with the shared subject prefix; correct the mail-header docstring and add `report.title` guidance to `--help`.
-- Reuse existing report/config modules. No MQTT/config-loader implementation or schema changes.
-- Extend the existing test fixtures with configurable titles and real `MailTo` execution while mocking the external mail boundary. Add three meaningful regressions covering named lifecycle paths, blank fallback and multiline subject handling.
-- Update README for current behavior, config example comments, every-function/command map and VERSIONING history.
-- Preserve DISCLAIMER.md and its exact owner-supplied text; retain all original project files and build metadata.
-- Refresh this verification report and PACKAGE_MANIFEST.json.
-
-The complete project was inspected in 0.0.15 and relevant paths were reread before this change. AST comparison against 0.0.15 confirms all main-module functions/classes are unchanged except `main` (version/help), `MailTo` (subject) and the `build_backup_mail_header` docstring. Config loader, MQTT module, Home Assistant blueprint, build helper/spec, requirements and disclaimer remain byte-for-byte unchanged from 0.0.15. The existing publisher process-group timeout fix is retained.
-
-## Automated verification
-
-| Check | Result |
-| --- | --- |
-| Full suite on Python 3.14 | 73 passed, 0 failed, 0 skipped |
-| Full suite on Python 3.12 | 73 passed, 0 failed, 0 skipped |
-| Named lifecycle regressions | Delete/dry-run success, checked-command failure and root rejection all carry matching subject/body/MQTT names |
-| Blank and multiline names | Legacy blank fallback retained; CR/LF/tab whitespace normalized only in subjects |
-| Frozen MQTT worker | All 3 localhost integration tests pass: QoS 0/1/2, rejection and process-group timeout |
-| Actual frozen application | Configured name reached a captured local mail subject/body and real localhost MQTT report during non-root rejection; exit 1 retained, no ZFS calls |
-| Python compile | App, config loader, MQTT module, tests and PyInstaller spec compile |
-| Shell syntax | `bash -n build-pyinstaller.sh` passes |
-| Documentation coverage | Every Python function/method/nested helper appears in commented_code_map.md |
-| Config example | All supported settings represented; dry-run and disabled notifications remain the defaults |
-
-Full-suite command from the project directory:
+Run tests from the project directory:
 
 ```bash
 python3 -B -m unittest discover -s tests -v
 ```
 
-ZFS and external mail delivery were mocked. Real MQTT protocol checks used only an ephemeral localhost broker fixture. The actual frozen app test captured a fake local `mail` command and relied on verified non-root rejection before dataset input or ZFS processing.
+## Package
 
-## CLI and standalone executable
+Keep all 28 previous project files and all 22 original archive paths. Regenerate PACKAGE_MANIFEST.json against the supplied original archive and previous 0.0.18 ZIP with per-file SHA-256 hashes, sizes, permission modes and no missing paths. Preserve original executable modes and use 0644 for data files without recorded Unix modes. The manifest self-hash/size are omitted to avoid circular metadata; an external archive SHA-256 covers the complete ZIP.
 
-The actual unchanged build helper recreated `dist/` and built the final Linux x86-64 executable using Python 3.12.14 and the declared build dependencies. It verified that `dist/` contains exactly one regular executable and ran its help/version smoke checks.
+Verify unique safe paths, ZIP CRCs, tree/archive equality, per-file hashes/sizes/modes, synchronized ledgers/configs, fresh extraction and its CLI. Package no __pycache__, bytecode, virtualenv, build/cache intermediates, runtime logs or temporary files. The preserved final dist executable is a deliverable, not cache. Sidecar report/manifest bytes match the packaged copies.
 
-Both source and frozen modes pass `-h`, `--help`, `--version`, missing-argument, unsupported/obsolete-flag, missing-config-via-either-alias, and malformed-TOML checks. Help includes the run-name setting. Version output is 0.0.16. Help/version/invalid-config checks create no runtime logs. Fresh extraction of the final ZIP passes the same checks.
+## Live-test limits
 
-Executable SHA-256:
+No production ZFS listing/destruction, mail/Pushover, MQTT credentials/ACLs/TLS, installed Home Assistant or scheduling changes are exercised. Actual HA rendering/discovery under this configuration still needs a user-run live test; the automated renders use fake HA registries. No alternate Python/runtime/platform or rebuilt frozen binary was tested.
 
-```text
-e4b450b7ad507dde5d10a733de620dfd80867fe32eb9677ec55f40d2fb9647b7
-```
-
-## Archive verification
-
-Original input: `CleanUpInSyncoidSnapshots-main.zip`.
-
-Original SHA-256:
-
-```text
-6f2b272f947e0536c5bc6f5c981c915b1eb76d715bddd50050aaeb89327b3c8d
-```
-
-Final archive: `CleanUpInSyncoidSnapshots-0.0.16.zip`.
-
-- Original files: 21. Final files: 22. Missing original paths: 0.
-- Against the original input: 9 intentionally modified files, 12 byte-for-byte unchanged files, and PACKAGE_MANIFEST.json added.
-- Against 0.0.15: all 22 relative file paths retained; 9 changed files including regenerated PACKAGE_MANIFEST.json, 13 unchanged.
-- Executable permissions retained on app script, build helper and standalone binary.
-- ZIP CRC, file paths, sizes, modes and hashes verified against the prepared project.
-- Fresh extraction matches every manifest hash and compiles successfully.
-- No Python bytecode/cache, build intermediates, virtualenvs, runtime logs or temporary files included.
-
-Changed since 0.0.15:
-
-```text
-CleanUpInSyncoidSnapshots.py
-PACKAGE_MANIFEST.json
-README.md
-VERIFICATION.md
-VERSIONING.md
-commented_code_map.md
-config-example.toml
-dist/CleanUpInSyncoidSnapshots
-tests/test_project.py
-```
-
-PACKAGE_MANIFEST.json records both baseline comparisons and file hashes. It excludes its own content hash to avoid circular metadata. SHA256SUMS-0.0.16.txt covers the final ZIP and separately supplied verification/manifest files. The 0.0.15 artifacts remain available unchanged.
-
-## Limits
-
-No real ZFS listing/destruction, production email delivery, production MQTT credentials/ACLs/TLS handshake, or running Home Assistant instance was tested. Frozen compatibility on other Linux systems/architectures and source compatibility under Python 3.10 were not tested. Existing source tests cover config/auth/TLS wiring using mocks; actual MQTT protocol delivery was checked locally.
-
-The app has no run lock; concurrent cleanup runs require external coordination. Verification is not a professional audit.
+The preserved bundled executable remains 0.0.16 and does not include dataset progress or the reporting integration. Use current 0.0.19 Python source, or rebuild a disposable project copy with the included helper. PyInstaller is unavailable in the active interpreter; no dependency installation/build was attempted. Reporting delivery remains bounded best-effort and never replaces job failure.

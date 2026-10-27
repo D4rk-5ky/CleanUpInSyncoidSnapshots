@@ -94,7 +94,14 @@ class TomlConfigTests(unittest.TestCase):
             document = config.tomllib.load(stream)
         self.assertEqual(set(document), config.TOP_LEVEL_SECTIONS)
         for section, keys in config.SECTION_KEYS.items():
-            self.assertEqual(set(document[section]), keys)
+            if section == "mqtt":
+                # Legacy aliases and optional derived values are documented as comments.
+                import re
+                text = (ROOT / "config-example.toml").read_text().split("[mqtt]", 1)[1]
+                examples = set(re.findall(r"(?m)^\s*(?:#\s*)?([A-Za-z_][A-Za-z_0-9]*)\s*=", text))
+                self.assertEqual(examples, keys)
+            else:
+                self.assertEqual(set(document[section]), keys)
 
     def test_example_loads_and_is_safe_by_default(self):
         loaded = config.load_config(ROOT / "config-example.toml", "fallback")
@@ -340,10 +347,10 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(report["stderr"], "dataset is busy")
 
     def test_fallback_title_and_output_limit(self):
-        error = app.CommandError(["zfs"], 1, "x" * 5000, "")
+        error = app.CommandError(["zfs"], 1, "", "x" * 5000)
         report = mqtt.build_mqtt_report(arguments(backup_title="  "), "0.0.1", 1, error)
         self.assertEqual(report["title"], "CleanUpInSyncoidSnapshots")
-        self.assertEqual(len(report["stderr"]), 4096)
+        self.assertEqual(len(report["stderr"]), 4000)
 
     def test_shared_notification_gate(self):
         self.assertFalse(mqtt.should_send_notification(True, False))
@@ -629,7 +636,7 @@ class LifecycleTests(unittest.TestCase):
                     self.assertEqual(recipient, "nobody@example.invalid")
                     report = notify.call_args.args[1]
                     self.assertEqual(report["title"], "NAS nightly cleanup")
-                    self.assertEqual(report["name"], "CleanUpInSyncoidSnapshots")
+                    self.assertEqual(report["name"], report["title"])
                     self.assertEqual(report["job"], "cleanup")
 
     def test_blank_run_name_preserves_email_subject_and_mqtt_fallback(self):

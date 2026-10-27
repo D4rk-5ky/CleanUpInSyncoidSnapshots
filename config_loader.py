@@ -12,7 +12,7 @@ except ModuleNotFoundError:  # Python 3.10 compatibility.
     except ModuleNotFoundError:  # pragma: no cover - depends on interpreter version.
         tomllib = None
 
-from mqtt_notifications import validate_mqtt_config
+from mqtt_reporting import REPORTING_KEYS, configure_reporting
 
 
 TOP_LEVEL_SECTIONS = {"cleanup", "logging", "report", "mail", "mqtt"}
@@ -46,6 +46,8 @@ SECTION_KEYS = {
         "on_success",
     },
 }
+
+SECTION_KEYS["mqtt"] |= REPORTING_KEYS
 
 
 def parse_older_than(value: str) -> datetime.timedelta:
@@ -194,12 +196,9 @@ def load_config(path: str, default_log_prefix: str):
         raise ValueError("mail.recipient must be a nonempty string when mail.enabled=true")
     send_mail = mail_recipient.strip() if mail_enabled else None
 
-    mqtt_enabled = _boolean(mqtt, "mqtt", "enabled", False)
-    mqtt_config = None
-    if mqtt_enabled:
-        supplied = dict(mqtt)
-        supplied.pop("enabled", None)
-        mqtt_config = validate_mqtt_config(supplied, config_path.parent)
+    mqtt_config, live_config = configure_reporting(mqtt, config_path, log_prefix)
+    live_name = _optional_string(mqtt, "mqtt", "LiveBackupName", "")
+    reporting_name = backup_title.strip() or live_name.strip() or "CleanUpInSyncoidSnapshots"
 
     return argparse.Namespace(
         command=command,
@@ -215,6 +214,8 @@ def load_config(path: str, default_log_prefix: str):
         backup_title=backup_title,
         backup_comment=backup_comment,
         mqtt_config=mqtt_config,
+        live_config=live_config,
+        reporting_name=reporting_name,
         config_file=str(config_path),
         dry_run=(command == "dry-run"),
     )
