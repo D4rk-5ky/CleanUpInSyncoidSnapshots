@@ -6,37 +6,102 @@ Every delivered version increments by 0.0.1. Patch values range from 0 to 99:
 0.0.98 → 0.0.99 → 0.1.0 → 0.1.1. Never create 0.0.100.
 Record every release's code and documentation changes here. Keep README.md about
 current usage and commented_code_map.md about current implementation.
-The application version is `__version__` in CleanUpInSyncoidSnapshots.py.
+The source application version is `__version__` in CleanUpInSyncoidSnapshots.py.
+Keep `VERSIONING.md` and `versioning.md` byte-identical after every release.
+When preserving an existing executable, record its independently checked version
+and explain how to run the current source or rebuild in a disposable copy.
 
-The supplied archive had no version identifier or version history. It is the
+The initial historical archive had no version identifier or version history. It is the
 unversioned baseline; 0.0.1 is the first numbered release, with no invented prior releases.
 
-## 0.0.16 — 2026-10-27
+## 0.0.20 — 2026-10-27
 
-### Place supporting Python code under modules/
+- Increment source version from 0.0.19 to 0.0.20, exactly one patch step.
+- Move config_loader.py, mqtt_notifications.py and mqtt_reporting.py into modules/. Add a minimal modules/__init__.py package marker. Update main imports to modules.* and intra-package imports to relative imports. Preserve the existing absolute-path source worker launchers and frozen worker hooks; both source workers remain independent of the shell working directory.
+- Move config.toml, config-example.toml, datasets-example and hostnames-example into configs/. Keep both TOML examples identical and preserve every parsed setting, existing completion topic and config-relative input/certificate resolution. Update only usage comments/version headers. Existing external -c/--config paths keep working.
+- Move live-preview-card.yaml, success-failure-automation.yaml and the former home-assistant persistent-notification blueprint into examples/. No standalone JSON example existed; PACKAGE_MANIFEST.json is release metadata and stays at the root. Move the blueprint without changing its contents.
+- Remove the now-empty home-assistant directory in the new release. Every existing project file is retained at its original or explicitly requested relocated path; do not add duplicate root wrappers or config/example copies.
+- Unignore the configs/ directory and complete config example so repository ignore rules do not hide the shipped examples. Keep site-local configs/config.toml ignored as before.
+- Update README/current code map, module/config usage, CLI help examples, tests, synchronized version ledgers, verification and manifest for the new layout. Keep all earlier ledger entries and disclaimer text verbatim. Add relocation mappings to the package audit so moves are distinguished from file loss.
+- Add four layout regressions covering unique file locations, external-CWD CLI/config loading, both actual source MQTT worker processes under fake Paho, and real Git ignore rules in a temporary repository. Retain all previous regression coverage.
 
-- Move config_loader.py, mqtt_notifications.py, mqtt_status.py and ha_live_preview.py into a modules package with an __init__.py.
-- Update the main script's imports and the adapters' relative imports. Keep the independent template workers executable by their resolved paths.
-- Update test imports, isolation working directories and syntax-check paths for the package layout.
-- Preserve configuration, input and log locations; keep completion and HA live enable switches independent.
-- Rebuild the one-file Linux executable with the packaged modules and verify both frozen MQTT workers.
-- Update README, current code map and verification evidence for the layout.
+Dataset 2/5 progress, snapshot selection/deletion/retention, root enforcement, continuation/exit semantics, logging location, notifications, scheduling, public CLI flags and configuration values are unchanged. Preserve the original 0.0.16 executable, build helper/spec and requirements; run current Python source for this layout. See VERIFICATION.md.
 
-## 0.0.15 — 2026-10-27
+## 0.0.19 — 2026-10-27
 
-### Syncerate template compatibility and independent HA live preview
+- Increment source version from 0.0.18 to 0.0.19, exactly one patch step.
+- Make main live progress use datasets_file entries: total is len of the existing parsed dataset list, available immediately after reading the file; completed is the number of finished dataset attempts, including checked failures. Do not deduplicate or change the original blank-line/input rules.
+- Observe the one-based current_dataset_index at the existing dataset loop. Expose both processed / configured count (2 / 5 = 40%) and current file position (third entry = 3 / 5). Interrupted or unstarted entries do not count as processed; continued failures advance progress while the original failed overall result remains intact.
+- Reuse RunReporting.update to derive progress from successful dataset completions plus dataset failures. Snapshot matching, skipped/failed/successful snapshot outcomes and destruction counts remain separate; no snapshot can advance the dataset counter. Keep scan_complete as a synchronization call that never forces the counter to total.
+- Set item_unit=datasets and add outcome_item_unit=snapshots to cleanup live/completion metadata. Generic LivePreview defaults outcome units to its progress unit, preserving generic integrations and old payload fallback behavior.
+- Update the Markdown card to show dataset progress, current dataset position, successful/failed dataset results and separately labeled snapshot outcome lists. Keep discovery identities, manufacturer matching, stable role markers, completion topics and Pushover guards unchanged.
+- Update module usage, README, both complete config comment sets, current function/command map, paired version ledgers, verification and package manifest. No new runtime setting or project file is added.
+- Adjust existing integration/card assertions and add five dataset-file regressions plus a shared test helper: five-entry delete/dry-run 2/5 behavior, continued failures, stop-on-failure, mid-file interrupt, blank/duplicate/empty files, and actual Markdown rendering with renamed sensors and separate snapshot outcomes.
 
-- Vendor the supplied template's `mqtt_status.py` and `ha_live_preview.py` 1.1.0 unchanged.
-- Build completion reports with boolean success, schema version, host, shared run ID and the template's typed fields; use its 4,000-character stderr tail and bounded non-retained publisher.
-- Preserve cleanup's dry-run summary and add planned/failed/skipped dataset diagnostics.
-- Accept JSON application configs with the template's completion/live objects, plus equivalent TOML tables. Preserve legacy mqtt configs and their omitted QoS/success defaults; reject simultaneous mqtt/completion aliases.
-- Resolve both channels' TLS paths relative to the application config.
-- Add independently enabled live progress/discovery, dataset classification, real counters/phases and stderr. Keep transfer measurements unknown and actual dry-run publishing separately opt-in.
-- Acquire a live-device lock before starting publication; reject duplicate live writers within the installation without running cleanup or overwriting active state.
-- Finish and close live monitoring on normal/error/interrupt paths, preserving cleanup outcomes and completion delivery independently of live transport failures.
-- Register both private worker routes for source and frozen builds. Rebuild the bundled Linux x86_64 executable as 0.0.15.
-- Upgrade the HA notification blueprint's schema checks and include a separate live dashboard, full JSON/TOML config examples and payload examples.
-- Expand regression tests with the template suites and adapter lifecycle/configuration/policy checks. See VERIFICATION.md for results and limitations.
+Snapshot selection, ZFS argv, retention, root enforcement, mail, MQTT delivery, continuation rules, exit codes and scheduling are unchanged. Preserve all original files and the supplied 0.0.16 executable; run current Python source for this update. See VERIFICATION.md.
+
+## 0.0.18 — 2026-10-27
+
+- Increment from 0.0.17 by exactly 0.0.1. Integrate the supplied reporting/live template without changing snapshot selection, root enforcement, retention, dataset continuation, mail behavior, ZFS commands, scheduling or overall job exit codes.
+- The supplied template archive contains mqtt_status.py, ha_live_preview.py, manufacturer-live-preview-card.yaml and home-assistant-pushover-automation.yaml rather than the four requested basenames. Adapt their code/examples into mqtt_reporting.py, live-preview-card.yaml, success-failure-automation.yaml and the project's complete config.toml. Do not copy template prompt/docs or add a documentation directory.
+- Reuse config_loader.py and the existing MQTT transport/timeout worker in mqtt_notifications.py. Accept supplied canonical options alongside existing aliases; canonical spellings take precedence. Preserve the existing completion topic and every non-MQTT configuration section/value. Allow live-only configuration without a completion topic. Add independent live enablement and the full commented option set with placeholder credentials; config.toml and config-example.toml are identical safe examples.
+- Standardize completion name/title to the friendly run name, keep job as the existing stable log prefix, and add typed success, run_id, host and timestamp. Status, boolean success and integer exit_code agree. Preserve original overall failures and interrupts; carry real child command codes in optional failed_datasets. Keep original dry_run_report dataset diagnostics as a project extension; generic reports have no dataset fields.
+- Capture actual ZFS and mail child stderr in memory, including successful-command stderr, and report the latest 4,000 characters. Remove the old stdout fallback. No JSON configuration/state/cache/log files are added. Existing application logs and packaging manifest remain as before.
+- Observe existing snapshot listing, selection, retain/age skips, malformed-timestamp skips, dry-run previews and individual destroys. Live job_type=syncoid_snapshot_cleanup and item_unit=snapshots; outcome arrays use record_item and successful/failed/skipped item counts. Generic completed decisions/attempts stay separate from latest outcome classifications. Totals stay null until enumeration is known, and transfer bytes/rates stay null. Failure/interrupt/incomplete live states never force progress to 100%.
+- Separate non-retained live state/events from completion notifications. Retain discovery/last real result only; opt-in dry-runs never overwrite the last real result. Hash host/job/config for device identity, support configurable manufacturer and stable role markers, and bound background publisher process groups including frozen descendants. Broker/reporting errors never replace job failures.
+- Adapt the Markdown card to actual fields, dynamic item units, snapshot/dataset details, outcomes/reasons, runtime/heartbeat/stderr and retained results. Preserve manufacturer discovery and entity-rename support. Adapt the Pushover example to the existing topic with early dry-run/type/consistency guards, useful diagnostics and bounded title/message lengths; add no job sequence or scheduler.
+- Update the existing receive-only persistent-notification blueprint's application filter to job_type, since name is now friendly. Preserve the blueprint file and all other controls.
+- Retain the original executable byte-for-byte at version 0.0.16; it does not include this integration. Run current source or rebuild in a disposable copy. No PyInstaller installation/build is performed.
+- Extend existing tests only where the new requested contract changes name/stderr/config expectations; add one reporting test file derived from supplied regression fixtures plus real lifecycle/command-stderr, independent-channel, HA rendering, Pushover-limit and loopback live-broker tests. Keep all original file paths and prior release entries; update current README, module/config comments, code map, synchronized ledgers, verification and package manifest. Preserve both disclaimer sections verbatim.
+
+See VERIFICATION.md for executed results and remaining production/ZFS/TLS/HA/frozen-build limits.
+
+## 0.0.17 — 2026-10-27
+
+- Increment source version from 0.0.16 to 0.0.17, exactly one patch step. This is the only runtime source edit; no function, parser behavior, schema, dependency or cleanup policy changes.
+- Inspect every source module, test, build file, integration example and document before editing. Use the supplied Next-branch ZIP as the baseline; keep all 22 original relative file paths.
+- Clarify current usage in README and config comments: the existing missing-dataset classifier applies to checked list OR destroy failures containing `dataset does not exist`, not just listing. It is case-insensitive. No classification or continuation logic changes.
+- Clarify existing log zero-age behavior and invalid-timestamp warning behavior in README, and correct the destroy-command explanation in the code map to use the same diagnostic-based classification. Keep complete flag/command/option descriptions and both owner-supplied disclaimer sections verbatim.
+- Identify source and executable versions separately in README and the code map. Preserve the original standalone executable byte-for-byte at `dist/CleanUpInSyncoidSnapshots` (verified version 0.0.16); run Python source for 0.0.17 or rebuild in a disposable copy. No executable build was attempted because PyInstaller is unavailable in the active interpreter.
+- Update the source version header in the complete config example and explain source/frozen log placement. All available options, defaults, and example values remain unchanged.
+- Refresh the current function/command map, retaining every existing function/test/helper explanation. Add `versioning.md` as a synchronized complete copy of this original uppercase ledger; preserve all previous release entries verbatim.
+- Refresh VERIFICATION.md with this environment's actual checks and limits. Regenerate PACKAGE_MANIFEST.json against the supplied original archive, retaining original/release hashes, path classifications and permission metadata; provide an external ZIP SHA-256 checksum.
+- Package the complete project, including original binary, build metadata, tests, repository metadata, examples and Home Assistant blueprint, without caches, bytecode, build intermediates, runtime logs or temporary files. Verify CRCs, hashes, paths, permissions and fresh extraction.
+
+Safety behavior is unchanged: root enforcement, snapshot matching, age/count retention, dry-run, single-snapshot destruction, continuation with failed overall result, mail/MQTT opt-in and success gates, non-retained publishing and process-group timeout remain as supplied. Live ZFS destruction, production mail/MQTT/TLS and Home Assistant remain untested here. See `VERIFICATION.md` for exact results.
+
+## 0.0.16 — 2026-10-26
+
+- Increment from 0.0.15 to 0.0.16.
+- Reuse the existing `[report].title` as the configurable run name. It already travels in MQTT JSON `title` and the email body; include it as `[run name]` at the start of every subject through the shared `MailTo` function.
+- Preserve SUCCESS/FAILED and DRY-RUN status text, including root-check failure subjects. Collapse title whitespace in subjects to keep multiline TOML titles on one line; retain the full title/comment in email bodies. Blank titles preserve the existing subject.
+- Keep MQTT `name` fixed as the application identifier and `job` as the log prefix so Home Assistant filtering and existing consumers remain compatible. No duplicate configuration option, new public flag or MQTT schema change is needed.
+- Add end-to-end notification regressions for named delete/dry-run success/failure and root rejection, plus blank/multiline title cases. ZFS and mail are mocked.
+- Update current-use README, complete config comments, `--help` guidance and function/command map with the run-name setting and examples. Preserve the owner's disclaimer.
+- Rebuild the standalone executable, refresh verification evidence and regenerate the clean package manifest against both the preceding release and the original input archive.
+
+Cleanup selection, retention, root enforcement, dry-run protection, continuation/failure behavior, notification enablement/success gating, MQTT transport, publisher process-group timeout, log naming and topics are unchanged.
+
+See `VERIFICATION.md` for checks and limitations.
+
+## 0.0.15 — 2026-10-26
+
+- Increment the application/package version from 0.0.14 to 0.0.15; retain the patch-99 rollover rule.
+- Set argparse's program name explicitly from the invoked filename. Python 3.14 otherwise uses the surrounding module launcher in embedded/test invocations, breaking CLI-name/version expectations.
+- Expand `--help` with TOML `dry-run`/`delete` meanings, root enforcement, notification opt-in, config-relative paths, and the existing no-age/zero-retention destructive selection behavior. No public operational flag is added.
+- Fix frozen publisher timeout cleanup: replace the direct `subprocess.run` call with a shared `_run_publisher` helper that starts an isolated Linux process session and kills the entire publisher process group on timeout or interruption, then reaps the launcher. This prevents a PyInstaller child from remaining connected after its launcher was killed. Secrets stay on stdin, timeout failures stay nonfatal, and cleanup exit policy is unchanged.
+- Add a regression simulating an exited launcher with a child holding output pipes, and retarget publisher-wrapper mocks to the new helper.
+- Correct `BrokerIntegrationTests.exchange` to set `on_success=True` for its successful report. The fixture previously requested a success report under failure-only policy, so real-Paho tests timed out without connecting. Production notification gating is unchanged.
+- Strengthen the existing help regression to check mode/safety guidance and prove configuration is not loaded; accept the equivalent short/long metavar formatting used by different supported Python versions.
+- Update README for current use, exit/report semantics, dry-run side effects and early-report limitations, concurrent-run coordination, and the complete owner-supplied disclaimer. Preserve `DISCLAIMER.md` byte-for-byte.
+- Refresh config example comments with version/help usage, dry-run side effects, no-age/zero-retention behavior and the existing zero-duration distinction. All available options remain represented; the schema/defaults are unchanged.
+- Update the function/command map, including build-shell/spec operations and test-fixture intent. Preserve the original uppercase `VERSIONING.md` as the single version history.
+- Rebuild the included `dist/CleanUpInSyncoidSnapshots` executable from this release's sources. Preserve every original relative file path, including build metadata, repository metadata, tests, input examples and Home Assistant blueprint.
+- Replace verification evidence with this release's actual checks and limitations; add `PACKAGE_MANIFEST.json` with original-relative classifications and file hashes. Package only project files and the final executable, excluding caches, bytecode, build intermediates, virtualenvs and temporary files.
+
+Snapshot selection, destruction, retention, dry-run protection, root guard, continuation/final-failure rules, mail/MQTT enablement, non-retained MQTT, publisher timeout and Home Assistant behavior remain intact. Production changes cover the version, public parser naming/help, and enforcement of the existing publisher timeout across frozen worker descendants.
+
+See `VERIFICATION.md` for baseline findings, final results, frozen executable checks and live-system limitations.
 
 ## 0.0.14 — 2026-10-02
 
