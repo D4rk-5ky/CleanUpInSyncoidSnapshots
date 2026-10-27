@@ -1,5 +1,8 @@
 """CleanUpInSyncoidSnapshots completion and independent HA live reporting.
 
+Run from project root: sudo python3 CleanUpInSyncoidSnapshots.py -c configs/config.toml.
+Shared imports use the modules package; config inputs stay beside the TOML in configs/.
+
 Usage (no extra JSON/state/cache/log files): configure the existing TOML [mqtt]
 section; run the same app -c/--config command. MQTT_JSON_Status enables final
 non-retained JSON; SendMQTTOnSuccess opts into successful completions. Failures
@@ -7,12 +10,11 @@ still report. LiveMQTTEnabled independently enables live state/discovery.
 LiveNotify* controls live events only, never completion/Pushover or retained
 last_result. LiveMQTTOnDryRun defaults false; previews never replace last_result.
 
-config.toml/config-example.toml describe every option and legacy aliases. Keep
-mqtt_json_topic at your existing completion topic. Import success-failure-
-automation.yaml manually and replace notify.pushover with your HA action; avoid
+configs/config.toml and configs/config-example.toml describe every option and legacy aliases. Keep
+mqtt_json_topic at your existing completion topic. Import examples/success-failure-automation.yaml manually and replace notify.pushover with your HA action; avoid
 duplicate notification automations. Dry-runs and inconsistent completion reports
 are stopped before any action. This project defines no job-sequencing actions.
-Paste live-preview-card.yaml as a Markdown card and match its manufacturer value
+Paste examples/live-preview-card.yaml as a Markdown card and match its manufacturer value
 to LiveManufacturer. Device IDs derive from host + stable job + config path;
 optional LiveDeviceID can pin an identity (must remain unique per host/job).
 Renaming sensors is supported by live_preview_role attributes.
@@ -55,7 +57,7 @@ import time
 from typing import Any, Mapping, Sequence
 import uuid
 
-__version__ = "0.0.19"
+__version__ = "0.0.20"
 WORKER_FLAG = "--ha-live-preview-worker"
 STDERR_LIMIT = 4000
 
@@ -702,7 +704,7 @@ REPORTING_KEYS = set(ALIASES) | LIVE_KEYS | {"MQTTJSONOnDryRun"}
 
 def configure_reporting(table: dict, config_path: Path, job: str):
     """Reuse the existing transport validator; canonical options override legacy aliases."""
-    from mqtt_notifications import validate_mqtt_config
+    from .mqtt_notifications import validate_mqtt_config
     shared = {key: value for key, value in table.items() if key not in REPORTING_KEYS}
     for supplied, legacy in ALIASES.items():
         if supplied in table:

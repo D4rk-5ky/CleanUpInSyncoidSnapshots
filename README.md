@@ -2,7 +2,7 @@
 
 CleanUpInSyncoidSnapshots removes matching Syncoid-created ZFS snapshots, can preview the exact deletion set first, produces a final dry-run report, prunes its own log groups with the same retention settings, and can optionally send email and typed MQTT completion reports, and offers independent Home Assistant live preview of snapshot decisions and deletions.
 
-Current source application version: **0.0.19**. Run `python3 CleanUpInSyncoidSnapshots.py --version` to confirm it.
+Current source application version: **0.0.20**. Run `python3 CleanUpInSyncoidSnapshots.py --version` to confirm it.
 
 The included `dist/CleanUpInSyncoidSnapshots` is the preserved **0.0.16** Linux x86-64 executable. Use the Python source for the current release and its reporting integration. To produce a current standalone executable, build from a separate disposable project copy with the helper below; the helper replaces that copy's existing `dist/`. Verify the resulting executable with `--version` before installing it.
 
@@ -57,11 +57,11 @@ After PyInstaller finishes, the build script verifies that `dist/` contains **ex
 Copy the complete example and protect it because it can contain mail and MQTT credentials:
 
 ```bash
-cp config-example.toml config.toml
-chmod 600 config.toml
+cp configs/config-example.toml configs/config.toml
+chmod 600 configs/config.toml
 ```
 
-The distributed `config.toml` and `config-example.toml` are identical safe examples. Every runtime setting is in this TOML file. Relative filesystem paths are resolved relative to the TOML file itself, not the shell's current directory.
+The distributed `configs/config.toml` and `configs/config-example.toml` are identical safe examples. Every runtime setting is in this TOML file. Relative filesystem paths are resolved relative to the TOML file itself, not the shell's current directory.
 
 The example defaults to `command = "dry-run"`, with both mail and MQTT disabled.
 
@@ -116,7 +116,7 @@ Mail failure is logged but does not turn an otherwise successful cleanup into a 
 
 ### `[mqtt]`
 
-The complete option reference and integration usage are in the `mqtt_reporting.py` module docstring and comments in `config.toml` / `config-example.toml`. Both examples preserve the completion topic `homeassistant/CleanUpInSyncoidSnapshots/Zotac-RI531/status` and use placeholder credentials.
+The complete option reference and integration usage are in the `modules/mqtt_reporting.py` module docstring and comments in `configs/config.toml` / `configs/config-example.toml`. Both examples preserve the completion topic `homeassistant/CleanUpInSyncoidSnapshots/Zotac-RI531/status` and use placeholder credentials.
 
 - `MQTT_JSON_Status` enables final completion JSON independently of live preview. `SendMQTTOnSuccess` defaults to false: failures report whenever completion reporting is enabled, while successes require opt-in. `MQTTJSONOnDryRun` independently controls completion previews and defaults to true, preserving the existing dry-run failure policy.
 - `LiveMQTTEnabled` independently enables snapshot live state. `LiveMQTTDiscovery` publishes retained discovery; `LiveManufacturer` identifies jobs for the Markdown card. Live events are controlled by `LiveNotifyStart`, `LiveNotifySuccess`, and `LiveNotifyFailure`; they never send Pushover or control completion reports. `LiveMQTTOnDryRun` defaults false, and opted-in previews never overwrite the retained last real result.
@@ -176,7 +176,7 @@ The configuration selector only chooses the TOML file. Cleanup mode, input files
 Run it with the short option:
 
 ```bash
-sudo python3 CleanUpInSyncoidSnapshots.py -c config.toml
+sudo python3 CleanUpInSyncoidSnapshots.py -c configs/config.toml
 ```
 
 Or use the equivalent long option:
@@ -188,13 +188,13 @@ sudo python3 CleanUpInSyncoidSnapshots.py --config /etc/cleanup-syncoid/config.t
 When using the documented virtual environment:
 
 ```bash
-sudo .venv/bin/python CleanUpInSyncoidSnapshots.py -c config.toml
+sudo .venv/bin/python CleanUpInSyncoidSnapshots.py -c configs/config.toml
 ```
 
 When using the PyInstaller executable:
 
 ```bash
-sudo ./dist/CleanUpInSyncoidSnapshots -c config.toml
+sudo ./dist/CleanUpInSyncoidSnapshots -c configs/config.toml
 ```
 
 To display help without running cleanup:
@@ -331,7 +331,7 @@ A final MQTT message is JSON with these fields:
   "command": "delete",
   "dry_run": false,
   "comment": "",
-  "version": "0.0.19",
+  "version": "0.0.20",
   "timestamp": "2026-10-27T12:00:00+00:00",
   "host": "nas-host",
   "run_id": "unique-run-identifier",
@@ -367,24 +367,28 @@ Dry-run MQTT reports additionally contain a `dry_run_report` object such as:
 
 ## Home Assistant examples
 
-`live-preview-card.yaml` remains a Markdown card with `content: |`. Match its manufacturer variable to `LiveManufacturer`. It discovers devices automatically, follows stable role markers after entity renames, displays snapshot outcomes/reasons, dataset scan details, actual stderr, runtime and heartbeat, and labels retained prior results. Main progress counts entries in `datasets_file`: with five nonblank entries, two processed entries show **Datasets: 2 / 5 processed (40%)**. The current dataset also has a one-based position (for example, position 3 / 5 while the third is running). Failed attempts count as processed while keeping the job failed; interruptions leave the current entry unfinished. Blank lines are ignored and repeated entries count separately. The total is known as soon as the file is read, independent of snapshot counts or listing failures. Snapshot outcomes have their own labels/counters; they do not advance dataset progress. Before reading the file, totals stay unknown. Cleanup has no measured byte or transfer rate, so transfer panels are hidden. A lost heartbeat for a newer run never reuses an older success as that run's outcome.
+`examples/live-preview-card.yaml` remains a Markdown card with `content: |`. Match its manufacturer variable to `LiveManufacturer`. It discovers devices automatically, follows stable role markers after entity renames, displays snapshot outcomes/reasons, dataset scan details, actual stderr, runtime and heartbeat, and labels retained prior results. Main progress counts entries in `datasets_file`: with five nonblank entries, two processed entries show **Datasets: 2 / 5 processed (40%)**. The current dataset also has a one-based position (for example, position 3 / 5 while the third is running). Failed attempts count as processed while keeping the job failed; interruptions leave the current entry unfinished. Blank lines are ignored and repeated entries count separately. The total is known as soon as the file is read, independent of snapshot counts or listing failures. Snapshot outcomes have their own labels/counters; they do not advance dataset progress. Before reading the file, totals stay unknown. Cleanup has no measured byte or transfer rate, so transfer panels are hidden. A lost heartbeat for a newer run never reuses an older success as that run's outcome.
 
-`success-failure-automation.yaml` is a completion-only Pushover example on the existing completion topic. Its comments explain the action placeholder and duplicate-notification handling. It rejects previews and inconsistent reports before actions; live state/events never trigger it. It adds no scheduling or job sequence. Install examples manually after reviewing the module/config comments; tests do not modify HA or send live notifications.
+`examples/success-failure-automation.yaml` is a completion-only Pushover example on the existing completion topic. Its comments explain the action placeholder and duplicate-notification handling. It rejects previews and inconsistent reports before actions; live state/events never trigger it. It adds no scheduling or job sequence. Install examples manually after reviewing the module/config comments; tests do not modify HA or send live notifications.
 
 
-`home-assistant/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml` is a receive-only Home Assistant automation blueprint. Configure its MQTT topic to exactly match `[mqtt].topic` in your TOML file.
+`examples/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml` is a receive-only Home Assistant automation blueprint. Configure its MQTT topic to exactly match `[mqtt].topic` in your TOML file.
 
 The blueprint can independently show clean success, success-with-warning, failure, and dry-run notifications, displays the aggregate dry-run counts when present, and can either replace the previous notification or create separate notifications. It does not publish commands, start cleanup, or invoke ZFS.
 
 ## Project files
 
+Runtime helpers are in `modules/`, the distributed configuration/input examples are in `configs/`, and Home Assistant YAML examples are in `examples/`. Run the root application with `-c configs/config.toml`. Keep config-relative input/certificate paths relative to the selected TOML file. Release metadata such as `PACKAGE_MANIFEST.json` stays at the root; it is not a JSON example. No standalone JSON example file was supplied in this project.
+
+
 - `CleanUpInSyncoidSnapshots.py` - application entry point and original cleanup/email/log lifecycle.
-- `config_loader.py` - TOML loading, validation, path resolution, and conversion into the existing runtime values.
-- `config-example.toml` - complete commented configuration example containing every supported setting.
-- `mqtt_notifications.py` - reused legacy transport validation, typed completion adapter, bounded publishing, and internal completion worker.
-- `mqtt_reporting.py` - template-derived completion contract, independent live preview, generic item API, and small cleanup adapter; includes usage instructions.
-- `config.toml` - complete safe application/reporting configuration; identical to the example.
-- `success-failure-automation.yaml`, `live-preview-card.yaml` - commented completion/Pushover and manufacturer-discovered Markdown card examples.
+- `modules/__init__.py` - package marker for shared-module imports and frozen builds.
+- `modules/config_loader.py` - TOML loading, validation, path resolution, and conversion into the existing runtime values.
+- `configs/config-example.toml` - complete commented configuration example containing every supported setting.
+- `modules/mqtt_notifications.py` - reused legacy transport validation, typed completion adapter, bounded publishing, and internal completion worker.
+- `modules/mqtt_reporting.py` - template-derived completion contract, independent live preview, generic item API, and small cleanup adapter; includes usage instructions.
+- `configs/config.toml` - complete safe application/reporting configuration; identical to the example.
+- `examples/success-failure-automation.yaml`, `examples/live-preview-card.yaml` - commented completion/Pushover and manufacturer-discovered Markdown card examples.
 - `tests/test_mqtt_reporting.py` - reporting, lifecycle, rendering and localhost integration regressions.
 - `requirements.txt` - Python 3.10 TOML compatibility dependency.
 - `requirements-mqtt.txt` - optional MQTT dependency plus base requirements.
@@ -392,8 +396,8 @@ The blueprint can independently show clean success, success-with-warning, failur
 - `CleanUpInSyncoidSnapshots.spec` - one-file PyInstaller specification that explicitly collects Paho and Tomli runtime modules.
 - `build-pyinstaller.sh` - reproducible build helper; creates the build venv, recreates `dist/` empty, and fails unless the only final entry is `dist/CleanUpInSyncoidSnapshots`.
 - `dist/` - contains the preserved executable identified above; generated final-output directory when building. It is ignored by Git, deleted/recreated empty on every build, and must contain only `CleanUpInSyncoidSnapshots` when the build succeeds.
-- `datasets-example`, `hostnames-example` - input-file examples.
-- `home-assistant/` - receive-only Home Assistant MQTT notification blueprint.
+- `configs/datasets-example`, `configs/hostnames-example` - input-file examples.
+- `examples/` - receive-only Home Assistant MQTT notification blueprint.
 - `tests/test_project.py` - regression tests with ZFS/mail mocked and optional loopback MQTT integration tests.
 - `commented_code_map.md` - current function and command map.
 - `VERSIONING.md`, `versioning.md` - synchronized copies of the complete release-by-release change record and patch-99 rollover policy.

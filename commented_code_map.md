@@ -1,6 +1,6 @@
-# Commented code map — CleanUpInSyncoidSnapshots 0.0.19
+# Commented code map — CleanUpInSyncoidSnapshots 0.0.20
 
-This file explains the current 0.0.19 source implementation. Release changes belong in the synchronized `VERSIONING.md` and `versioning.md` files. The preserved `dist/CleanUpInSyncoidSnapshots` executable reports 0.0.16; run source for this release or build a disposable copy for a current executable.
+This file explains the current 0.0.20 source implementation. Release changes belong in the synchronized `VERSIONING.md` and `versioning.md` files. The preserved `dist/CleanUpInSyncoidSnapshots` executable reports 0.0.16; run source for this release or build a disposable copy for a current executable.
 
 ## `CleanUpInSyncoidSnapshots.py`
 
@@ -34,14 +34,14 @@ This file explains the current 0.0.19 source implementation. Release changes bel
 | `delete_old_files` | Applies the existing shared retention policy to timestamp-paired `.log`/`.err` groups. It returns matched/selected group and selected-file counts for the final report; in dry-run it only reports candidates and never removes files. |
 | `main` | Public entry point. Before public argument parsing, a private frozen-worker environment marker can route a PyInstaller child process directly into `publish_worker`; report/config data still arrives on stdin. Normal invocations explicitly derive argparse `prog` from the invoked filename so help/version naming also stays consistent on Python 3.14+. Help explains both TOML modes, root, notification gating, relative paths, and the no-age/zero-retention deletion case. Normal invocations provide standard `-h/--help` and `--version`, accept equivalent `-c CONFIG` / `--config CONFIG`, reject old operational flags, load/validate TOML before cleanup, preserve exit/exception behavior, and build the final MQTT report after finalization. Before calling MQTT it applies the shared success/failure gate, so successful delete and dry-run runs with `mqtt.on_success=false` never enter the notifier. The help/version actions exit before config loading or destructive work. A second private hook handles live workers. Bind RunReporting around the existing lifecycle, preserve the actual outcome/interrupt code, finalize live independently, and protect completion construction/delivery from replacing the job outcome. |
 | `run_cleanup` | Cleanup lifecycle reused by the TOML interface: logger setup, root guard, input-file loading, dry-run/delete processing, optional mail, log retention, and empty `.err` cleanup. It aggregates dry-run snapshot counts, previews old-log retention before the final dry-run report on successful previews, applies identical mail success gating to delete and dry-run, and logs `Success mail report suppressed by mail.on_success=false.` on either successful mode when mail is enabled but success reporting is disabled. It records/classifies dataset failures, applies continuation settings, and prunes old logs destructively only after a successful delete run. |
-| Imported `parse_older_than` | Re-exported from `config_loader.py` so existing callers/tests can still use `CleanUpInSyncoidSnapshots.parse_older_than` while parsing logic lives with configuration validation. |
+| Imported `parse_older_than` | Re-exported from `modules/config_loader.py` so existing callers/tests can still use `CleanUpInSyncoidSnapshots.parse_older_than` while parsing logic lives with configuration validation. |
 
-## `config_loader.py`
+## `modules/config_loader.py`
 
 | Function/constant | What it does and why |
 | --- | --- |
 | `TOP_LEVEL_SECTIONS` | Exact accepted TOML sections. Unknown sections are rejected to catch misspelled configuration before destructive work. |
-| `SECTION_KEYS` | Exact accepted keys in each section, including both cleanup continuation booleans and matching `on_success` switches for mail/MQTT. Tests use it to ensure `config-example.toml` documents every supported setting. |
+| `SECTION_KEYS` | Exact accepted keys in each section, including both cleanup continuation booleans and matching `on_success` switches for mail/MQTT. Tests use it to ensure `configs/config-example.toml` documents every supported setting. |
 | `parse_older_than` | Converts `Nd`, `Nw`, or `Nm` into `timedelta`, preserving the original 30-day-month rule. Empty/optional handling is done by `load_config`. |
 | `_table` | Reads one TOML table, verifies its type, enforces required sections, rejects unknown keys, and gives a targeted migration error when obsolete `mqtt.publish_dry_run` is found. |
 | `_required_string` | Validates nonempty string settings such as command and required file paths without coercing wrong TOML types. |
@@ -51,7 +51,7 @@ This file explains the current 0.0.19 source implementation. Release changes bel
 | `load_config` | Opens TOML with `tomllib`/`tomli`, validates all application sections, converts age/defaults, defaults both continuation switches to `true`, maps mail `on_success`, validates enabled MQTT settings including MQTT `on_success`, and calls configure_reporting for canonical/legacy MQTT aliases plus independent live settings before returning the runtime namespace. The friendly MQTT name uses report.title, then LiveBackupName, then the application name. No non-MQTT setting is remapped. |
 | `tomllib` / `tomli` import fallback | Python 3.11+ uses the standard library; Python 3.10 falls back to the dependency in `requirements.txt` to preserve the project's prior Python 3.10 minimum. |
 
-## `mqtt_notifications.py`
+## `modules/mqtt_notifications.py`
 
 | Function/constant | What it does and why |
 | --- | --- |
@@ -60,7 +60,7 @@ This file explains the current 0.0.19 source implementation. Release changes bel
 | `validate_mqtt_config` | Validates the enabled `[mqtt]` TOML settings, rejects unknown/wrong types and wildcard publish topics, normalizes empty optional strings to absent values, enforces username/password and certificate/key relationships, and resolves certificate files relative to the TOML directory. |
 | `build_mqtt_report` | Uses the configured run name (`report.title`) in JSON `title`, with application-name fallback when blank. Sets both `name` and `title` to the friendly name, keeps `job` as the stable log prefix, and identifies this application by `job_type`. Produces the Home Assistant-facing JSON schema using cleanup result, report metadata, warning state, command, version, and typed `success`/`exit_code`/warning/dry-run fields, shared run identity and latest 4,000 characters of actual stderr (never stdout or fabricated log text). Failed datasets carry original child exit codes only as an optional project extension. Dry-run payloads additionally receive the aggregate `dry_run_report` object supplied by the cleanup lifecycle. |
 | `_run_publisher` | Starts the publisher in a new Linux session with stdin and captured output pipes. `communicate` enforces the configured timeout. On timeout or interruption, `os.killpg(..., SIGKILL)` terminates that isolated process group, including PyInstaller bootloader descendants, before draining pipes and reaping the launcher. It returns a `CompletedProcess` to preserve the caller's nonfatal-delivery policy. |
-| `notify_mqtt` | Defensive MQTT notification wrapper. It applies the independent `send_on_dry_run` gate and re-applies `should_send_notification` so a successful report with `mqtt.on_success=false` cannot launch the publisher even if a caller bypasses the main lifecycle gate. In source mode it starts `mqtt_notifications.py --publish`; in a PyInstaller build it relaunches the same frozen executable with a private environment marker. Both forms use `_run_publisher` to pass config/report on stdin, enforce the hard timeout for the entire isolated publisher process group, keep credentials off argv, and leave cleanup outcome unchanged if publishing fails. |
+| `notify_mqtt` | Defensive MQTT notification wrapper. It applies the independent `send_on_dry_run` gate and re-applies `should_send_notification` so a successful report with `mqtt.on_success=false` cannot launch the publisher even if a caller bypasses the main lifecycle gate. In source mode it starts `modules/mqtt_notifications.py --publish`; in a PyInstaller build it relaunches the same frozen executable with a private environment marker. Both forms use `_run_publisher` to pass config/report on stdin, enforce the hard timeout for the entire isolated publisher process group, keep credentials off argv, and leave cleanup outcome unchanged if publishing fails. |
 | `publish_worker` | Internal Paho one-shot MQTT 3.1.1 publisher. Builds auth/TLS context, publishes with configured QoS, and always uses `retain=False`. |
 | `if __name__ == "__main__"` worker gate | Accepts only the internal `--publish` argument. This is not a public application option; normal users run `CleanUpInSyncoidSnapshots.py -c CONFIG`. Unexpected worker arguments exit immediately. |
 
@@ -79,7 +79,7 @@ This file explains the current 0.0.19 source implementation. Release changes bel
 
 | Test | Purpose |
 | --- | --- |
-| `test_example_contains_every_supported_setting` | Ensures `config-example.toml` has every supported section/key and no undocumented extras. |
+| `test_example_contains_every_supported_setting` | Ensures `configs/config-example.toml` has every supported section/key and no undocumented extras. |
 | `test_example_loads_and_is_safe_by_default` | Confirms the packaged example parses, defaults to dry-run, leaves mail/MQTT disabled, and resolves paths correctly. |
 | `test_defaults_and_negative_retain_compatibility` | Confirms optional defaults, both continuation defaults are `true` when omitted, and negative-retain normalization remains zero. |
 | `test_invalid_cleanup_and_unknown_keys_are_rejected` | Confirms invalid commands/types, misspelled keys, and unknown sections fail before cleanup. |
@@ -209,23 +209,23 @@ This file explains the current 0.0.19 source implementation. Release changes bel
 
 | Command | What it does and why |
 | --- | --- |
-| `sudo python3 CleanUpInSyncoidSnapshots.py -c config.toml` | Public cleanup invocation using the short configuration selector. `-c` chooses the TOML file; every cleanup/retention/reporting setting comes from it. |
-| `sudo python3 CleanUpInSyncoidSnapshots.py --config config.toml` | Equivalent public cleanup invocation using the long configuration selector. |
+| `sudo python3 CleanUpInSyncoidSnapshots.py -c configs/config.toml` | Public cleanup invocation using the short configuration selector. `-c` chooses the TOML file; every cleanup/retention/reporting setting comes from it. |
+| `sudo python3 CleanUpInSyncoidSnapshots.py --config configs/config.toml` | Equivalent public cleanup invocation using the long configuration selector. |
 | `python3 CleanUpInSyncoidSnapshots.py -h` / `--help` | Displays the standard CLI help, every public flag, and examples, then exits before configuration loading, root checks, logging, or ZFS work. |
-| `python3 CleanUpInSyncoidSnapshots.py --version` | Prints `CleanUpInSyncoidSnapshots.py 0.0.19` and exits before configuration loading, logging, root checks, or ZFS work. |
-| `sudo .venv/bin/python CleanUpInSyncoidSnapshots.py -c config.toml` | Same cleanup invocation when using the documented virtual environment. |
+| `python3 CleanUpInSyncoidSnapshots.py --version` | Prints `CleanUpInSyncoidSnapshots.py 0.0.20` and exits before configuration loading, logging, root checks, or ZFS work. |
+| `sudo .venv/bin/python CleanUpInSyncoidSnapshots.py -c configs/config.toml` | Same cleanup invocation when using the documented virtual environment. |
 | `zfs list -H -t snapshot -o name DATASET` | Lists snapshot names for one explicit dataset in machine-readable form; no recursive traversal is requested. Checked failures are recorded and the matching cleanup continuation setting decides whether the outer loop advances to the next dataset. |
 | `zfs destroy SNAPSHOT` | Deletes exactly one selected snapshot. No `-r`, force, wildcard, or shell expansion is used. A checked failure stops work inside that dataset. If stderr contains `dataset does not exist` (case-insensitive), the outer loop follows `continue_on_missing_dataset`; otherwise it follows `continue_on_other_failures`. Either category makes the final run fail. |
 | `mail -s SUBJECT [--attach FILE ...] RECIPIENT` | Optional external mail delivery using the current log/error files. |
-| `python -B mqtt_notifications.py --publish` | Internal timeout-isolated MQTT worker launched only by `notify_mqtt`; credentials/report arrive on stdin. `--publish` is not a public application flag. |
+| `python -B modules/mqtt_notifications.py --publish` | Internal timeout-isolated MQTT worker launched only by `notify_mqtt`; credentials/report arrive on stdin. `--publish` is not a public application flag. |
 | `python3 -m venv .venv` | Creates an isolated Python environment when desired. |
 | `.venv/bin/python -m pip install -r requirements.txt` | Installs `tomli` only when Python <3.11 requires it. |
 | `.venv/bin/python -m pip install -r requirements-mqtt.txt` | Installs base requirements plus optional Paho MQTT. |
 | `./build-pyinstaller.sh` | Run in a separate disposable project copy to retain the supplied executable. Recreates a clean `.venv-build`, removes prior `build/` and `dist/`, recreates `dist/` empty, installs `requirements-build.txt`, runs the one-file PyInstaller spec with explicit build/dist paths, fails unless `dist/` contains exactly one executable named `CleanUpInSyncoidSnapshots`, then smoke-tests that executable. |
-| `sudo ./dist/CleanUpInSyncoidSnapshots -c config.toml` | Runs the frozen one-file build. It accepts the same public CLI/config as source mode; Python, Paho and Tomli are bundled, while host `zfs` and optional `mail` remain external. |
-| `./dist/CleanUpInSyncoidSnapshots --help` / `--version` | Smoke-safe help/version actions on the frozen build. The preserved supplied binary reports 0.0.16; a rebuild from current source reports 0.0.19. |
-| `cp config-example.toml config.toml` | Creates a local editable config from the complete reference. |
-| `chmod 600 config.toml` | Protects a config that may hold MQTT credentials and mail destinations. |
+| `sudo ./dist/CleanUpInSyncoidSnapshots -c configs/config.toml` | Runs the frozen one-file build. It accepts the same public CLI/config as source mode; Python, Paho and Tomli are bundled, while host `zfs` and optional `mail` remain external. |
+| `./dist/CleanUpInSyncoidSnapshots --help` / `--version` | Smoke-safe help/version actions on the frozen build. The preserved supplied binary reports 0.0.16; a rebuild from current source reports 0.0.20. |
+| `cp configs/config-example.toml configs/config.toml` | Creates a local editable config from the complete reference. |
+| `chmod 600 configs/config.toml` | Protects a config that may hold MQTT credentials and mail destinations. |
 | `python3 -B -m unittest discover -s tests -v` | Runs safe regression tests; ZFS/mail are mocked, and real MQTT tests use loopback only. |
 
 ## Files
@@ -233,25 +233,25 @@ This file explains the current 0.0.19 source implementation. Release changes bel
 | File | Why it exists |
 | --- | --- |
 | `CleanUpInSyncoidSnapshots.py` | Public application entry point and retained cleanup/email/log logic. |
-| `config_loader.py` | Single-TOML parsing and validation boundary before destructive work. |
-| `config-example.toml` | Identical to distributed `config.toml`; complete commented reference for every supported runtime setting. |
-| `mqtt_notifications.py` | Optional status-report validation and isolated publisher. |
+| `modules/config_loader.py` | Single-TOML parsing and validation boundary before destructive work. |
+| `configs/config-example.toml` | Identical to distributed `configs/config.toml`; complete commented reference for every supported runtime setting. |
+| `modules/mqtt_notifications.py` | Optional status-report validation and isolated publisher. |
 | `requirements.txt` | Python 3.10 TOML parser compatibility dependency. |
 | `requirements-mqtt.txt` | Optional Paho dependency plus base requirements. |
 | `requirements-build.txt` | PyInstaller build environment requirements: runtime MQTT dependency set, forced Tomli fallback, and PyInstaller itself. |
 | `CleanUpInSyncoidSnapshots.spec` | One-file PyInstaller definition. Explicit hidden-import collection includes all Paho and Tomli submodules; project/stdlib modules are discovered normally. |
 | `build-pyinstaller.sh` | Build helper that recreates the isolated build venv and leaves the final executable at `dist/CleanUpInSyncoidSnapshots`, then smoke-tests it. |
-| `dist/` | Generated final executable output directory. It is intentionally ignored by Git, recreated for builds, and included in this release ZIP with the preserved 0.0.16 executable. Source reports 0.0.19; rebuilding in a disposable copy replaces its binary. Runtime logs are created only when running cleanup. |
-| `datasets-example` | Original dataset-list example. |
-| `hostnames-example` | Original hostname-list example. |
-| `home-assistant/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml` | Receive-only example blueprint for final MQTT reports. |
+| `dist/` | Generated final executable output directory. It is intentionally ignored by Git, recreated for builds, and included in this release ZIP with the preserved 0.0.16 executable. Source reports 0.0.20; rebuilding in a disposable copy replaces its binary. Runtime logs are created only when running cleanup. |
+| `configs/datasets-example` | Original dataset-list example. |
+| `configs/hostnames-example` | Original hostname-list example. |
+| `examples/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml` | Receive-only example blueprint for final MQTT reports. |
 | `tests/test_project.py` | Regression and loopback integration tests. |
 | `README.md` | Current usage/configuration documentation only. |
 | `VERSIONING.md`, `versioning.md` | Byte-identical complete release history and version policy; update both together to support either requested filename. |
 | `VERIFICATION.md` | Evidence and test limitations for the packaged release. |
 | `PACKAGE_MANIFEST.json` | Original-relative path comparison and SHA-256 hashes for the packaged files, plus unchanged/modified/added classifications. The manifest excludes its own hash to avoid a circular digest; ZIP integrity and the external archive checksum cover it. |
 | `DISCLAIMER.md` | Existing liability/data-loss warning. |
-| `.gitignore` | Keeps local runtime TOML/input files, logs, Python caches, virtual environments, and build outputs out of commits while explicitly preserving `config-example.toml`. |
+| `.gitignore` | Keeps local runtime TOML/input files, logs, Python caches, virtual environments, and build outputs out of commits while explicitly preserving `configs/config-example.toml`. |
 | `.github/CODEOWNERS` | Existing repository ownership metadata. |
 
 ## Safety boundaries retained
@@ -274,7 +274,7 @@ This file explains the current 0.0.19 source implementation. Release changes bel
 The Home Assistant blueprint's `trigger: mqtt` receives reports for one exact configured topic. Its template conditions validate the application/status and apply notification preferences. `persistent_notification.create` displays a report, optionally reusing `notification_id`; it performs no cleanup commands.
 
 
-## `mqtt_reporting.py` — completion contract and independent live preview
+## `modules/mqtt_reporting.py` — completion contract and independent live preview
 
 The module docstring contains integration usage. The single adapter observes existing work; it neither selects new cleanup candidates nor issues ZFS, mail, scheduling or HA commands.
 
@@ -427,10 +427,10 @@ Template-derived live/card checks and project-specific integration checks use fa
 
 ## Added integration files and private command
 
-- `config.toml`: same complete safe example as `config-example.toml`, with original non-MQTT sections and completion topic preserved. All credentials are placeholders; both channels default disabled.
-- `live-preview-card.yaml`: Markdown `content: |` template; manufacturer discovery and stable roles choose actual live or retained result data. Dataset-file progress/current position and separate snapshot outcomes appear for this job; generic item units and null measurements remain meaningful for other jobs. Lost heartbeats never assert a new success.
-- `success-failure-automation.yaml`: completion-topic-only Pushover example. An early preview guard and typed/consistent result condition run before actions; title/message are bounded. No sequencing/scheduling action is introduced.
-- `python -B mqtt_reporting.py --ha-live-preview-worker`: internal stdin-fed live publisher only; the public application CLI is unchanged. Rebuilt frozen apps dispatch the same private flag before public parsing. The preserved 0.0.16 binary does not implement it.
+- `configs/config.toml`: same complete safe example as `configs/config-example.toml`, with original non-MQTT sections and completion topic preserved. All credentials are placeholders; both channels default disabled.
+- `examples/live-preview-card.yaml`: Markdown `content: |` template; manufacturer discovery and stable roles choose actual live or retained result data. Dataset-file progress/current position and separate snapshot outcomes appear for this job; generic item units and null measurements remain meaningful for other jobs. Lost heartbeats never assert a new success.
+- `examples/success-failure-automation.yaml`: completion-topic-only Pushover example. An early preview guard and typed/consistent result condition run before actions; title/message are bounded. No sequencing/scheduling action is introduced.
+- `python -B modules/mqtt_reporting.py --ha-live-preview-worker`: internal stdin-fed live publisher only; the public application CLI is unchanged. Rebuilt frozen apps dispatch the same private flag before public parsing. The preserved 0.0.16 binary does not implement it.
 
 The existing receive-only persistent-notification blueprint now identifies the application by `job_type`, allowing friendly completion `name`/`title` values without losing its controls.
 
@@ -455,3 +455,18 @@ The existing receive-only persistent-notification blueprint now identifies the a
 | `DatasetFileProgressTests.test_stopped_failure_and_midfile_interrupt_leave_remaining_entries_unprocessed` | Stop after one checked failure at 1/5, or interrupt the third entry at 2/5; never force remaining progress. |
 | `DatasetFileProgressTests.test_duplicate_entries_and_empty_file_use_exact_existing_input_rules` | Count repeated entries separately, ignore blank lines and keep zero-total percent unknown without changing the parser. |
 | `DatasetFileProgressTests.test_card_renders_dataset_ratio_and_separate_snapshot_outcomes` | Render the real Markdown card with renamed sensors and show dataset ratio/current position while outcome rows remain snapshots. |
+
+
+## Package layout and relocation checks
+
+`modules/__init__.py` marks the shared runtime package; it performs no job action. The root app imports `modules.config_loader`, `modules.mqtt_notifications` and `modules.mqtt_reporting`. Intra-package imports are relative. Workers still launch their own absolute source paths, or use the existing frozen hooks. `CleanUpInSyncoidSnapshots.spec` discovers the imported package through the root entry point; the spec and build helper are unchanged, and a rebuilt binary was not tested here.
+
+`configs/` holds both complete TOML examples and the unchanged dataset/hostname examples. Relative configured input paths still resolve against the selected TOML directory, so paired files work after relocation. `examples/` holds all three Home Assistant YAML examples, including the moved persistent-notification blueprint. The root JSON manifest is actual release metadata; no standalone JSON example was present to move.
+
+| Function/class | What it verifies and why |
+| --- | --- |
+| `LayoutTests` | Protect the requested modules/configs/examples organization without changing job logic or creating duplicate files. |
+| `LayoutTests.test_auxiliary_files_have_one_location_in_requested_folders` | Check the relocated files exist exactly where requested, the old runtime/config paths are gone, and real release metadata remains at root. |
+| `LayoutTests.test_external_cwd_cli_and_config_relative_input_paths` | Run actual source help/version and config loading from outside the project, proving imports and paired input paths work without relying on the shell CWD. |
+| `LayoutTests.test_both_source_workers_resolve_modules_from_external_cwd` | Run both real source worker subprocesses under fake Paho from another directory, capturing delivery calls without contacting a broker. |
+| `LayoutTests.test_gitignore_keeps_config_examples_visible_and_private_config_ignored` | Use an isolated Git repository to prove configs examples remain visible while site-local config.toml remains ignored. |

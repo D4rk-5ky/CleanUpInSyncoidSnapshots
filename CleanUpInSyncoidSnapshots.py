@@ -8,12 +8,12 @@ import argparse
 import glob
 import sys
 from typing import List, Tuple, Optional
-from config_loader import load_config, parse_older_than
-from mqtt_notifications import build_mqtt_report, notify_mqtt, publish_worker, should_send_notification
-from mqtt_reporting import RunReporting, observe, run_worker_if_requested
+from modules.config_loader import load_config, parse_older_than
+from modules.mqtt_notifications import build_mqtt_report, notify_mqtt, publish_worker, should_send_notification
+from modules.mqtt_reporting import RunReporting, observe, run_worker_if_requested
 
 
-__version__ = "0.0.19"
+__version__ = "0.0.20"
 
 
 class ReportWarningHandler(logging.Handler):
@@ -654,12 +654,12 @@ def main():
             "  delete   Destroy selected snapshots and prune eligible old logs.\n"
             "Both modes require root. Enabled failure notifications can be sent in either mode;\n"
             "success notifications require mail.on_success=true or MQTT SendMQTTOnSuccess=true (legacy on_success=true).\n"
-            "LiveMQTTEnabled independently controls snapshot live preview; see config.toml comments.\n"
+            "LiveMQTTEnabled independently controls snapshot live preview; see configs/config.toml comments.\n"
             "Review a dry-run first. No age cutoff with retain_count=0 selects every matching snapshot.\n"
             "Relative input/certificate paths are resolved beside the TOML file.\n"
             "Run name: set report.title to label MQTT reports and email subjects.\n\n"
             "Examples:\n"
-            "  %(prog)s -c config.toml\n"
+            "  %(prog)s -c configs/config.toml\n"
             "  %(prog)s --config /etc/cleanup-syncoid/config.toml"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,

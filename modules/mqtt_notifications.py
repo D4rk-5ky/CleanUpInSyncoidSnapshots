@@ -87,7 +87,7 @@ def validate_mqtt_config(supplied, base_dir):
 def build_mqtt_report(args, version, exit_code, error=None, warning=False, dry_run_report=None,
                       *, run_id=None, stderr_text=None, dataset_failures=None):
     """Adapt real cleanup results to typed completion JSON; dataset details are optional."""
-    from mqtt_reporting import build_report
+    from .mqtt_reporting import build_report
     friendly_name = getattr(args, "reporting_name", None) or args.backup_title.strip() or "CleanUpInSyncoidSnapshots"
     if stderr_text is None:
         # No stdout fallback: stderr must be actual child diagnostics.

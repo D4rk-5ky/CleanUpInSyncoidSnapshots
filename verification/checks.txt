@@ -1,8 +1,0 @@
-PASS: All runtime/test/spec files compile; Python source parses as Python 3.10 syntax; build shell syntax passes.
-PASS: Cleanup entry-point AST unchanged except version; both supplied reporting modules match the new template byte-for-byte. Config loader retains the script manufacturer default unchanged; adapters/disclaimer remain unchanged and all previous test functions are retained.
-PASS: All 281 declared functions/methods have descriptions and current line references; supplied disclaimer is verbatim in README and DISCLAIMER; README links and unchanged release history/rollover rule and byte-identical uppercase/lowercase versioning files pass.
-PASS: All four config examples enumerate every supported option for their selected completion spelling and default to dry-run with mail/completion/live disabled; payload examples validate as v0.0.19.
-PASS: Source/frozen --version, --help, missing config, unknown flag and invalid config behave correctly from unrelated working directory without creating its logs or running cleanup.
-PASS: Existing HA YAML documents parse and Jinja notification gate accepts consistent completion events/rejects malformed variants; no live HA instance used.
-PASS: Automatic card Markdown/YAML content matches; manufacturer selector and app default agree, no fixed entity IDs are required, and automation/config completion topics match.
-PASS: Current input template fingerprint, exact publisher/card compatibility and separate Ubuntu completion profile/manufacturer identity agree.

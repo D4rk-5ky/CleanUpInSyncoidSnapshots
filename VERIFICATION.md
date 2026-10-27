@@ -1,41 +1,57 @@
-# Verification — CleanUpInSyncoidSnapshots 0.0.19
+# Verification — CleanUpInSyncoidSnapshots 0.0.20
 
-Date: 2026-10-27. Previous source: 0.0.18; current source: 0.0.19 (one patch step).
+Date: 2026-10-27. Previous release: 0.0.19. Current source: 0.0.20 (one patch step).
 
-## Change
+## Layout
 
-Main live progress now follows the existing parsed datasets_file list. Its total is the number of nonempty entries, available immediately after reading the file. Blank lines are ignored and repeated entries count separately in file order, exactly as the existing cleanup parser processes them.
+- `modules/`: config_loader.py, mqtt_notifications.py and mqtt_reporting.py, with a minimal __init__.py package marker. Root main imports use modules.*; internal imports are relative. Source workers still launch their own absolute file paths. Frozen hooks, build helper/spec and requirements are unchanged.
+- `configs/`: config.toml, config-example.toml, datasets-example and hostnames-example. Both TOML files remain identical and their parsed values are identical to 0.0.19. Input paths stay relative to the selected TOML; the input examples remain beside it. Root help/README commands now use `-c configs/config.toml`; external custom config paths continue to work.
+- `examples/`: live-preview-card.yaml, success-failure-automation.yaml and the relocated persistent-notification blueprint formerly under home-assistant/. All three YAML files retain their exact bytes. The now-empty home-assistant directory is removed in the new release.
+- No standalone JSON example existed. PACKAGE_MANIFEST.json is actual release metadata and remains at root. No new JSON configuration/state/cache/log files are introduced.
 
-`completed` counts finished dataset attempts: successful dataset returns plus checked dataset failures. `total` remains fixed even if a ZFS listing fails. Two finished entries in a five-entry file therefore report 2 / 5 and 40%. `details.current_dataset_index` shows the current one-based position, so the third running entry is position 3 / 5 while processed progress is still 2 / 5. An interruption leaves its current entry unfinished; stop-on-failure leaves later entries unprocessed.
+Ten existing files are relocated, one package marker is added, and every one of the previous 28 project files is retained at its existing or mapped destination. The release contains 29 files. No duplicate root wrappers or copied config/example files are left behind. VERSIONING.md/versioning.md record the change and retain all previous entries verbatim; README and the code map describe current paths. Disclaimers remain verbatim.
 
-`item_unit` is datasets. Snapshot outcomes remain separate, labeled by the new `outcome_item_unit = snapshots`; snapshot matches, retention skips, invalid timestamps, dry-run decisions, failed destroys and successful destroys never advance dataset progress. Snapshot decision counts remain available as details.snapshots_processed. A failed job can legitimately reach 100% dataset progress when every entry was attempted; its job status/code remains failure. No finish call forces a percentage or counter. Before the input file can be read, total remains null; an empty file has total 0 and unknown percentage.
+The configs directory/example is explicitly unignored so Git does not hide the shipped reference; site-local configs/config.toml remains ignored. Packaging deliberately includes the safe distributed config copy, as in the previous release.
 
-The updated Markdown card shows processed dataset ratio, current file position, successful/failed dataset results and separate snapshot outcome lists. Generic live adapters default outcome units to their progress unit; older payloads without outcome_item_unit fall back to item_unit. Discovery IDs, manufacturer/role markers, completion topic, delivery behavior, Pushover guards, input rules, ZFS arguments, retention, root enforcement, mail, continuation policy, job exit codes and scheduling are unchanged. No new runtime setting or project file is added.
+## Verification completed
 
-## Verification
+Environment: Linux x86-64, Python 3.14.4, Paho MQTT 2.1.0, Jinja2 and PyYAML.
 
-- Full regression suite: 137 tests passed, zero failures/skips, on Python 3.14.4 in 4.627 seconds. Existing localhost Paho completion/live tests, worker timeout tests and offline HA/Pushover renders remain passing. Cleanup commands and actual notifications are intercepted; real protocol tests use only temporary localhost brokers.
-- Five new regressions and one reused lifecycle helper cover the exact 2/5 state before the third entry in both delete/dry-run, continued failures, stopped failure at 1/5, interrupt at 2/5, duplicate/blank/empty input and actual card rendering with renamed sensors and separate snapshot outcomes.
-- Snapshot selection and ZFS command functions retain their 0.0.18 ASTs. Cleanup lifecycle differs only in observation placement and enumerating the same dataset list to observe its one-based position; normalizing those observations/index returns the original lifecycle AST.
-- Compile all six Python files and the PyInstaller spec with bytecode only in scratch. Verify source/preserved-executable help/version and safe invalid-argument/config cases (20 checks), Bash syntax, and four more help/version checks after fresh archive extraction.
-- All 257 functions/methods/nested helpers and all 24 classes are covered by commented_code_map.md. README/module/config comments describe current dataset progress. VERSIONING.md and versioning.md are byte-identical, with all earlier release entries preserved verbatim.
-- Both config examples are byte-identical and contain the same parsed values as 0.0.18, including all non-MQTT values, existing completion topic and disabled reporting defaults. All 61 supported keys remain represented, including optional/legacy examples in comments. No credential values are added.
-- README disclaimer sections and DISCLAIMER.md are preserved verbatim. The original standalone binary, build helper/spec, requirements, input examples and repository metadata retain their bytes. No integration JSON configuration/state/cache/log files are introduced.
+- 141 tests passed, zero failures/skips, in 7.008 seconds. All previous dataset progress (2/5), cleanup/retention, exit-code, notification, stderr, live state, HA/Pushover rendering and ephemeral localhost broker coverage remains passing.
+- Four new layout regressions verify unique relocated paths, help/version and config loading from a foreign working directory, both actual source worker subprocesses under fake Paho from that directory, and real Git ignore behavior in an isolated temporary repository.
+- Real MQTT protocol tests use ephemeral localhost fixtures only. ZFS, mail and production notification effects are intercepted; no destructive job, live Pushover notification or installed HA change occurs.
+- Compile seven Python files (including the new package marker) plus the PyInstaller spec. Bytecode is written only to scratch outside the release. Bash syntax passes. Twenty source/preserved-executable CLI help/version/invalid-input checks pass without runtime logs; four further checks run after fresh ZIP extraction.
+- AST comparison confirms every runtime function/class matches 0.0.19 after normalizing package-import syntax and the CLI help's config path. The only other source edits are version metadata and usage documentation. Dataset progress, snapshot selection, exact ZFS argv, retention, root guard, continuation/error codes, notifications, log placement and scheduling are unchanged.
+- Both TOML configs have identical bytes and unchanged parsed settings, including every non-MQTT value, completion topic, disabled defaults and placeholder credential. All 61 supported settings remain represented, including optional/legacy examples in comments.
+- Unchanged input examples and YAML files match their prior content hashes at the new destinations. Binary, build helper/spec, requirements, ownership metadata and DISCLAIMER.md are byte-identical to 0.0.19. README disclaimers and prior version entries are verbatim; paired ledgers match.
+- The code map covers all 261 functions/methods/nested helpers and all 25 classes. The package marker has no functions or job actions and is explained in the file/layout map.
 
-Run tests from the project directory:
+Run from the project root:
 
 ```bash
 python3 -B -m unittest discover -s tests -v
+python3 CleanUpInSyncoidSnapshots.py --help
+python3 CleanUpInSyncoidSnapshots.py --version
 ```
 
-## Package
+For a reviewed job configuration, use the same public CLI with the relocated sample path:
 
-Keep all 28 previous project files and all 22 original archive paths. Regenerate PACKAGE_MANIFEST.json against the supplied original archive and previous 0.0.18 ZIP with per-file SHA-256 hashes, sizes, permission modes and no missing paths. Preserve original executable modes and use 0644 for data files without recorded Unix modes. The manifest self-hash/size are omitted to avoid circular metadata; an external archive SHA-256 covers the complete ZIP.
+```bash
+sudo python3 CleanUpInSyncoidSnapshots.py -c configs/config.toml
+```
 
-Verify unique safe paths, ZIP CRCs, tree/archive equality, per-file hashes/sizes/modes, synchronized ledgers/configs, fresh extraction and its CLI. Package no __pycache__, bytecode, virtualenv, build/cache intermediates, runtime logs or temporary files. The preserved final dist executable is a deliverable, not cache. Sidecar report/manifest bytes match the packaged copies.
+No operational cleanup command above was run during verification; actual effects are exercised only with safe test substitutes.
+
+## Archive audit
+
+PACKAGE_MANIFEST.json records the supplied original archive and previous 0.0.19 archive, both SHA-256 digests, explicit source-to-destination relocation mappings, source/release content hashes and sizes, file permission modes, and per-file unchanged/modified/relocated/added status. A moved path is audited against its original source path, not reported as a lost file. Every original and previous file resolves to a unique packaged destination, with no unmapped missing files.
+
+Verify safe unique relative ZIP paths, CRCs, complete tree/archive equality, all file hashes/sizes/modes, relocation completeness and a fresh extraction. Preserve recorded executable permissions; use 0644 data files and 0755 directories where no original Unix mode is recorded. Manifest self-hash/size are omitted to avoid circular metadata; the external ZIP checksum covers it. Report/manifest sidecars have the same bytes as their packaged copies.
+
+No __pycache__, .pyc/.pyo, venvs, build/cache intermediates, runtime logs, temporary files or test Git repository is packaged. The original final dist executable is retained as a deliverable.
 
 ## Live-test limits
 
-No production ZFS listing/destruction, mail/Pushover, MQTT credentials/ACLs/TLS, installed Home Assistant or scheduling changes are exercised. Actual HA rendering/discovery under this configuration still needs a user-run live test; the automated renders use fake HA registries. No alternate Python/runtime/platform or rebuilt frozen binary was tested.
+Production ZFS, mail/Pushover, MQTT credentials/ACLs/TLS and an installed Home Assistant instance remain untested. Actual deployment of discovery/cards/automations and another Python/platform require live testing. No scheduling or installed HA state was changed.
 
-The preserved bundled executable remains 0.0.16 and does not include dataset progress or the reporting integration. Use current 0.0.19 Python source, or rebuild a disposable project copy with the included helper. PyInstaller is unavailable in the active interpreter; no dependency installation/build was attempted. Reporting delivery remains bounded best-effort and never replaces job failure.
+The preserved dist/CleanUpInSyncoidSnapshots remains version 0.0.16 and does not include the integration/layout changes. Use the current Python source, or rebuild in a disposable project copy using the unchanged helper. PyInstaller is unavailable in the active interpreter; no dependency installation or rebuilt frozen executable was attempted. Import/package wiring is compiled and source-worker tested; a new frozen build remains unverified.
