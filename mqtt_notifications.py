@@ -84,26 +84,23 @@ def validate_mqtt_config(supplied, base_dir):
     return config
 
 
-def build_mqtt_report(args, version, exit_code, error=None, warning=False, dry_run_report=None):
-    """Build the Home Assistant-facing JSON report, including dry-run summary when available."""
-    report = {
-        "status": "success" if exit_code == 0 else "failure",
-        "title": args.backup_title.strip() or "CleanUpInSyncoidSnapshots",
-        "name": "CleanUpInSyncoidSnapshots",
-        "job": args.log_prefix,
-        "exit_code": exit_code,
-        "warning": bool(warning),
-        "error": str(error) if error is not None else "",
-        "stderr": (getattr(error, "stderr", "") or getattr(error, "stdout", "") or "")[-4096:],
-        "command": args.command,
-        "dry_run": args.command == "dry-run",
-        "comment": args.backup_comment,
-        "version": version,
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    }
+def build_mqtt_report(args, version, exit_code, error=None, warning=False, dry_run_report=None,
+                      *, run_id=None, stderr_text=None, dataset_failures=None):
+    """Adapt real cleanup results to typed completion JSON; dataset details are optional."""
+    from mqtt_reporting import build_report
+    friendly_name = getattr(args, "reporting_name", None) or args.backup_title.strip() or "CleanUpInSyncoidSnapshots"
+    if stderr_text is None:
+        # No stdout fallback: stderr must be actual child diagnostics.
+        failures = getattr(error, "failures", None)
+        stderr_text = "".join(item[2].stderr or "" for item in failures) if failures else (getattr(error, "stderr", "") or "")
+    extra = {"job_type": "syncoid_snapshot_cleanup", "item_unit": "datasets", "outcome_item_unit": "snapshots"}
     if dry_run_report is not None:
-        report["dry_run_report"] = dry_run_report
-    return report
+        extra["dry_run_report"] = dry_run_report
+    return build_report(name=friendly_name, title=friendly_name, job=args.log_prefix,
+                        exit_code=exit_code, error_message=str(error) if error is not None else "",
+                        stderr_text=stderr_text, warning=bool(warning), dry_run=args.command == "dry-run",
+                        command=args.command, comment=args.backup_comment, version=version,
+                        run_id=run_id, failed_datasets=dataset_failures or None, extra=extra)
 
 
 def _run_publisher(command, *, input, timeout, env=None):
@@ -142,6 +139,8 @@ def notify_mqtt(config, report, error_logger=None):
         return
     success = report.get("status") == "success"
     if not should_send_notification(success, config["on_success"]):
+        return
+    if report.get("dry_run") and not config.get("send_on_dry_run", True):
         return
     try:
         # stdin keeps credentials and report content out of the process command line.

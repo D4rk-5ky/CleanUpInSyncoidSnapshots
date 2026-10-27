@@ -10,9 +10,10 @@ import sys
 from typing import List, Tuple, Optional
 from config_loader import load_config, parse_older_than
 from mqtt_notifications import build_mqtt_report, notify_mqtt, publish_worker, should_send_notification
+from mqtt_reporting import RunReporting, observe, run_worker_if_requested
 
 
-__version__ = "0.0.16"
+__version__ = "0.0.19"
 
 
 class ReportWarningHandler(logging.Handler):
@@ -185,6 +186,7 @@ def run_cmd(
         text=True,
     )
 
+    observe("capture", proc.stderr)
     stdout = (proc.stdout or "").strip()
     stderr = (proc.stderr or "").strip()
 
@@ -202,7 +204,9 @@ def run_cmd(
                 error_logger.error(f"stdout:\n{stdout}")
 
         if check:
-            raise CommandError(cmd, proc.returncode, stdout, stderr)
+            error = CommandError(cmd, proc.returncode, stdout, stderr)
+            error.stderr_captured = True
+            raise error
 
     return proc
 
@@ -251,7 +255,9 @@ def send_mail(subject, body, recipient, attachment_files=None):
         body = "No mail body was generated. Check attached logs.\n"
 
     process = subprocess.Popen(mail_command, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    observe("update", phase="mail", current_item=recipient)
     _, stderr_output = process.communicate(input=body.encode())
+    observe("capture", stderr_output)
     return process.returncode, stderr_output.decode().strip()
 
 
@@ -402,6 +408,7 @@ def delete_syncoid_snapshots(
         rf"^(?P<full>.+)@syncoid_(?P<host>{host_alt})_(?P<ts>\d{{4}}-\d{{2}}-\d{{2}}:\d{{2}}:\d{{2}}:\d{{2}}-GMT[+-]?\d{{2}}:\d{{2}})$"
     )
 
+    observe("update", phase="listing_snapshots", current_item=dataset, current_dataset=dataset)
     proc = run_cmd(
         ["zfs", "list", "-H", "-t", "snapshot", "-o", "name", dataset],
         logger=logger,
@@ -411,6 +418,8 @@ def delete_syncoid_snapshots(
     lines = [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()]
     if not lines:
         return {"dataset": dataset, "matched": 0, "selected": 0}
+
+    observe("listed", sum(1 for name in lines if snap_regex.match(name)))
 
     # Group snapshots by hostname
     by_host: dict[str, list[tuple[datetime.datetime, str]]] = {h: [] for h in hostnames}
@@ -425,6 +434,7 @@ def delete_syncoid_snapshots(
             ts = parse_syncoid_ts(ts_str)
         except Exception as e:
             error_logger.error(f"Skipping snapshot with bad syncoid timestamp: {s} ({e})")
+            observe("item", "skipped", s, f"Invalid Syncoid timestamp: {e}", dataset=dataset)
             continue
         by_host.setdefault(host, []).append((ts, s))
 
@@ -447,6 +457,7 @@ def delete_syncoid_snapshots(
         first_host_printed = False
 
         total_matched += len(snaps)
+        observe("update", phase="selecting_snapshots", current_hostname=host)
 
         # Newest first
         snaps.sort(key=lambda x: x[0].astimezone(datetime.timezone.utc), reverse=True)
@@ -470,19 +481,35 @@ def delete_syncoid_snapshots(
                 f"[{dataset}] host={host} matched={len(snaps)} retain={retain_count} (no cutoff) delete={len(to_delete)}"
             )
 
+        # Reporting observes the existing selection, without extra ZFS commands.
+        selected = set(to_delete)
+        for _ts, protected in snaps:
+            if protected not in selected:
+                reason = "Protected by retain_count" if protected in keep_set else "Not older than age cutoff"
+                observe("item", "skipped", protected, reason, dataset=dataset, hostname=host)
         if to_delete:
             log_blank_line(logger)
         
+        observe("selected", len(to_delete))
+        observe("update", phase="previewing_snapshots" if dry_run else "destroying_snapshots")
         for snap_name in to_delete:
+            observe("update", current_item=snap_name)
             if dry_run:
                 logger.info(f"[DRY-RUN] Would delete syncoid snapshot: {snap_name}")
+                observe("item", "skipped", snap_name, "Dry-run: would delete; no destruction", dataset=dataset, hostname=host)
             else:
-                run_cmd(
-                    ["zfs", "destroy", snap_name],
-                    logger=logger,
-                    error_logger=error_logger,
-                    check=True,
-                )
+                try:
+                    run_cmd(
+                        ["zfs", "destroy", snap_name],
+                        logger=logger,
+                        error_logger=error_logger,
+                        check=True,
+                    )
+                except CommandError as exc:
+                    observe("item", "failure", snap_name, str(exc), dataset=dataset, hostname=host,
+                            exit_code=exc.returncode, stderr=(exc.stderr or "")[-4000:])
+                    raise
+                observe("item", "success", snap_name, "Snapshot destroyed", dataset=dataset, hostname=host)
                 logger.info(f"[{dataset}] Deleted syncoid snapshot: {snap_name}")
 
         total_delete += len(to_delete)
@@ -539,6 +566,7 @@ def delete_old_files(
       - If older_than is NOT provided: delete everything not in keep_set (retain-only).
       - If older_than is None AND retain_count == 0: do nothing.
     """
+    observe("update", phase="previewing_log_retention" if dry_run else "log_retention", current_item=log_folder)
     if older_than is None and retain_count <= 0:
         return {"groups_matched": 0, "groups_selected": 0, "files_selected": 0}
 
@@ -607,6 +635,9 @@ def main():
             sys.exit(1)
         return
 
+    if run_worker_if_requested():
+        return
+
     default_script_name = script_base_name()
 
     # The application intentionally exposes one operational setting on the CLI:
@@ -622,7 +653,8 @@ def main():
             "  dry-run  Preview snapshot and old-log candidates; create local logs.\n"
             "  delete   Destroy selected snapshots and prune eligible old logs.\n"
             "Both modes require root. Enabled failure notifications can be sent in either mode;\n"
-            "success notifications require the channel's on_success=true.\n"
+            "success notifications require mail.on_success=true or MQTT SendMQTTOnSuccess=true (legacy on_success=true).\n"
+            "LiveMQTTEnabled independently controls snapshot live preview; see config.toml comments.\n"
             "Review a dry-run first. No age cutoff with retain_count=0 selects every matching snapshot.\n"
             "Relative input/certificate paths are resolved beside the TOML file.\n"
             "Run name: set report.title to label MQTT reports and email subjects.\n\n"
@@ -666,10 +698,15 @@ def main():
     state = {}
     exit_code = 0
     failure = None
+    reporting = RunReporting(args, __version__)
     try:
+        try:
+            reporting.start()
+        except Exception:
+            pass
         run_cleanup(args, state)
     except SystemExit as exc:
-        exit_code = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+        exit_code = int(exc.code) if isinstance(exc.code, int) else (0 if exc.code is None else 1)
         failure = state.get("error") or (str(exc) if exit_code else None)
         raise
     except KeyboardInterrupt:
@@ -681,19 +718,26 @@ def main():
         failure = exc
         raise
     finally:
-        # Report only after existing mail and log cleanup have finished.
+        # Both channels observe the actual outcome after mail/log finalization.
+        # Reporting exceptions never mask a cleanup failure or alter its exit code.
+        try:
+            reporting.finish(exit_code, failure, state.get("warning", False))
+        except Exception:
+            pass
         if mqtt_config is not None:
-            report = build_mqtt_report(
-                args,
-                __version__,
-                exit_code,
-                failure,
-                state.get("warning", False),
-                state.get("dry_run_report"),
-            )
-            report_success = report.get("status") == "success"
-            if should_send_notification(report_success, mqtt_config["on_success"]):
-                notify_mqtt(mqtt_config, report, state.get("error_logger"))
+            try:
+                report = build_mqtt_report(
+                    args, __version__, exit_code, failure, state.get("warning", False),
+                    state.get("dry_run_report"), run_id=reporting.run_id,
+                    stderr_text=reporting.stderr, dataset_failures=reporting.failed_datasets,
+                )
+                report_success = report.get("status") == "success"
+                if should_send_notification(report_success, mqtt_config["on_success"]):
+                    notify_mqtt(mqtt_config, report, state.get("error_logger"))
+            except Exception:
+                # Do not expose credential-bearing exceptions or change job status.
+                if state.get("error_logger"):
+                    state["error_logger"].error("MQTT completion reporting failed; cleanup result is unchanged.")
         warning_handler = state.get("warning_handler")
         if warning_handler:
             state["error_logger"].removeHandler(warning_handler)
@@ -716,11 +760,12 @@ def run_cleanup(args, state):
 
     logger, error_logger, err_filepath = setup_logger(log_folder, log_date, prefix)
     state.update(error_logger=error_logger, err_filepath=err_filepath)
-    if args.mqtt_config:
+    if args.mqtt_config or getattr(args, "live_config", None):
         warning_handler = ReportWarningHandler(state)
         error_logger.addHandler(warning_handler)
         state["warning_handler"] = warning_handler
 
+    observe("update", phase="checking_permissions", current_item="root guard")
     if os.geteuid() != 0:
         msg = (
             "This script must be run as root (sudo). "
@@ -767,9 +812,11 @@ def run_cleanup(args, state):
         state["dry_run_report"] = dry_run_report
 
     try:
+        observe("update", phase="reading_inputs", current_item=args.datasets_file)
         # Read input files inside the try block, so bad paths also trigger error mail.
         with open(args.datasets_file, "r", encoding="utf-8") as file:
             datasets = [ln.strip() for ln in file.read().splitlines() if ln.strip()]
+        observe("update", datasets_configured=len(datasets))
 
         syncoid_hosts = read_hostnames(args.syncoid_hosts_file)
         if dry_run_report is not None:
@@ -780,7 +827,9 @@ def run_cleanup(args, state):
             logger.info("Starting snapshot deletion...")
             print_separator(logger)
 
-        for dataset in datasets:
+        for dataset_index, dataset in enumerate(datasets, start=1):
+            observe("update", phase="processing_dataset", current_item=dataset,
+                    current_dataset=dataset, current_dataset_index=dataset_index)
             try:
                 dataset_report = delete_syncoid_snapshots(
                     logger,
@@ -791,12 +840,15 @@ def run_cleanup(args, state):
                     retain_count,
                     dry_run,
                 )
+                observe("update", current_item=dataset)
+                observe("dataset_completed", dataset_report)
                 if dry_run_report is not None:
                     dry_run_report["datasets_completed"] += 1
                     dry_run_report["snapshots_matched"] += dataset_report["matched"]
                     dry_run_report["snapshots_would_delete"] += dataset_report["selected"]
                     dry_run_report["datasets"].append(dataset_report)
             except CommandError as exc:
+                observe("dataset_failure", dataset, exc)
                 missing = is_missing_dataset_error(exc)
                 kind = "missing" if missing else "other"
                 dataset_failures.append((dataset, kind, exc))
@@ -827,6 +879,7 @@ def run_cleanup(args, state):
                     raise dataset_failure from exc
             print_separator(logger)
 
+        observe("scan_complete")
         print_separator(logger)
         if dataset_failures:
             mode = "dry-run" if args.command == "dry-run" else "deletion"

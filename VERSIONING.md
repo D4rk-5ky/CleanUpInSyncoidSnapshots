@@ -6,10 +6,56 @@ Every delivered version increments by 0.0.1. Patch values range from 0 to 99:
 0.0.98 → 0.0.99 → 0.1.0 → 0.1.1. Never create 0.0.100.
 Record every release's code and documentation changes here. Keep README.md about
 current usage and commented_code_map.md about current implementation.
-The application version is `__version__` in CleanUpInSyncoidSnapshots.py.
+The source application version is `__version__` in CleanUpInSyncoidSnapshots.py.
+Keep `VERSIONING.md` and `versioning.md` byte-identical after every release.
+When preserving an existing executable, record its independently checked version
+and explain how to run the current source or rebuild in a disposable copy.
 
 The initial historical archive had no version identifier or version history. It is the
 unversioned baseline; 0.0.1 is the first numbered release, with no invented prior releases.
+
+## 0.0.19 — 2026-10-27
+
+- Increment source version from 0.0.18 to 0.0.19, exactly one patch step.
+- Make main live progress use datasets_file entries: total is len of the existing parsed dataset list, available immediately after reading the file; completed is the number of finished dataset attempts, including checked failures. Do not deduplicate or change the original blank-line/input rules.
+- Observe the one-based current_dataset_index at the existing dataset loop. Expose both processed / configured count (2 / 5 = 40%) and current file position (third entry = 3 / 5). Interrupted or unstarted entries do not count as processed; continued failures advance progress while the original failed overall result remains intact.
+- Reuse RunReporting.update to derive progress from successful dataset completions plus dataset failures. Snapshot matching, skipped/failed/successful snapshot outcomes and destruction counts remain separate; no snapshot can advance the dataset counter. Keep scan_complete as a synchronization call that never forces the counter to total.
+- Set item_unit=datasets and add outcome_item_unit=snapshots to cleanup live/completion metadata. Generic LivePreview defaults outcome units to its progress unit, preserving generic integrations and old payload fallback behavior.
+- Update the Markdown card to show dataset progress, current dataset position, successful/failed dataset results and separately labeled snapshot outcome lists. Keep discovery identities, manufacturer matching, stable role markers, completion topics and Pushover guards unchanged.
+- Update module usage, README, both complete config comment sets, current function/command map, paired version ledgers, verification and package manifest. No new runtime setting or project file is added.
+- Adjust existing integration/card assertions and add five dataset-file regressions plus a shared test helper: five-entry delete/dry-run 2/5 behavior, continued failures, stop-on-failure, mid-file interrupt, blank/duplicate/empty files, and actual Markdown rendering with renamed sensors and separate snapshot outcomes.
+
+Snapshot selection, ZFS argv, retention, root enforcement, mail, MQTT delivery, continuation rules, exit codes and scheduling are unchanged. Preserve all original files and the supplied 0.0.16 executable; run current Python source for this update. See VERIFICATION.md.
+
+## 0.0.18 — 2026-10-27
+
+- Increment from 0.0.17 by exactly 0.0.1. Integrate the supplied reporting/live template without changing snapshot selection, root enforcement, retention, dataset continuation, mail behavior, ZFS commands, scheduling or overall job exit codes.
+- The supplied template archive contains mqtt_status.py, ha_live_preview.py, manufacturer-live-preview-card.yaml and home-assistant-pushover-automation.yaml rather than the four requested basenames. Adapt their code/examples into mqtt_reporting.py, live-preview-card.yaml, success-failure-automation.yaml and the project's complete config.toml. Do not copy template prompt/docs or add a documentation directory.
+- Reuse config_loader.py and the existing MQTT transport/timeout worker in mqtt_notifications.py. Accept supplied canonical options alongside existing aliases; canonical spellings take precedence. Preserve the existing completion topic and every non-MQTT configuration section/value. Allow live-only configuration without a completion topic. Add independent live enablement and the full commented option set with placeholder credentials; config.toml and config-example.toml are identical safe examples.
+- Standardize completion name/title to the friendly run name, keep job as the existing stable log prefix, and add typed success, run_id, host and timestamp. Status, boolean success and integer exit_code agree. Preserve original overall failures and interrupts; carry real child command codes in optional failed_datasets. Keep original dry_run_report dataset diagnostics as a project extension; generic reports have no dataset fields.
+- Capture actual ZFS and mail child stderr in memory, including successful-command stderr, and report the latest 4,000 characters. Remove the old stdout fallback. No JSON configuration/state/cache/log files are added. Existing application logs and packaging manifest remain as before.
+- Observe existing snapshot listing, selection, retain/age skips, malformed-timestamp skips, dry-run previews and individual destroys. Live job_type=syncoid_snapshot_cleanup and item_unit=snapshots; outcome arrays use record_item and successful/failed/skipped item counts. Generic completed decisions/attempts stay separate from latest outcome classifications. Totals stay null until enumeration is known, and transfer bytes/rates stay null. Failure/interrupt/incomplete live states never force progress to 100%.
+- Separate non-retained live state/events from completion notifications. Retain discovery/last real result only; opt-in dry-runs never overwrite the last real result. Hash host/job/config for device identity, support configurable manufacturer and stable role markers, and bound background publisher process groups including frozen descendants. Broker/reporting errors never replace job failures.
+- Adapt the Markdown card to actual fields, dynamic item units, snapshot/dataset details, outcomes/reasons, runtime/heartbeat/stderr and retained results. Preserve manufacturer discovery and entity-rename support. Adapt the Pushover example to the existing topic with early dry-run/type/consistency guards, useful diagnostics and bounded title/message lengths; add no job sequence or scheduler.
+- Update the existing receive-only persistent-notification blueprint's application filter to job_type, since name is now friendly. Preserve the blueprint file and all other controls.
+- Retain the original executable byte-for-byte at version 0.0.16; it does not include this integration. Run current source or rebuild in a disposable copy. No PyInstaller installation/build is performed.
+- Extend existing tests only where the new requested contract changes name/stderr/config expectations; add one reporting test file derived from supplied regression fixtures plus real lifecycle/command-stderr, independent-channel, HA rendering, Pushover-limit and loopback live-broker tests. Keep all original file paths and prior release entries; update current README, module/config comments, code map, synchronized ledgers, verification and package manifest. Preserve both disclaimer sections verbatim.
+
+See VERIFICATION.md for executed results and remaining production/ZFS/TLS/HA/frozen-build limits.
+
+## 0.0.17 — 2026-10-27
+
+- Increment source version from 0.0.16 to 0.0.17, exactly one patch step. This is the only runtime source edit; no function, parser behavior, schema, dependency or cleanup policy changes.
+- Inspect every source module, test, build file, integration example and document before editing. Use the supplied Next-branch ZIP as the baseline; keep all 22 original relative file paths.
+- Clarify current usage in README and config comments: the existing missing-dataset classifier applies to checked list OR destroy failures containing `dataset does not exist`, not just listing. It is case-insensitive. No classification or continuation logic changes.
+- Clarify existing log zero-age behavior and invalid-timestamp warning behavior in README, and correct the destroy-command explanation in the code map to use the same diagnostic-based classification. Keep complete flag/command/option descriptions and both owner-supplied disclaimer sections verbatim.
+- Identify source and executable versions separately in README and the code map. Preserve the original standalone executable byte-for-byte at `dist/CleanUpInSyncoidSnapshots` (verified version 0.0.16); run Python source for 0.0.17 or rebuild in a disposable copy. No executable build was attempted because PyInstaller is unavailable in the active interpreter.
+- Update the source version header in the complete config example and explain source/frozen log placement. All available options, defaults, and example values remain unchanged.
+- Refresh the current function/command map, retaining every existing function/test/helper explanation. Add `versioning.md` as a synchronized complete copy of this original uppercase ledger; preserve all previous release entries verbatim.
+- Refresh VERIFICATION.md with this environment's actual checks and limits. Regenerate PACKAGE_MANIFEST.json against the supplied original archive, retaining original/release hashes, path classifications and permission metadata; provide an external ZIP SHA-256 checksum.
+- Package the complete project, including original binary, build metadata, tests, repository metadata, examples and Home Assistant blueprint, without caches, bytecode, build intermediates, runtime logs or temporary files. Verify CRCs, hashes, paths, permissions and fresh extraction.
+
+Safety behavior is unchanged: root enforcement, snapshot matching, age/count retention, dry-run, single-snapshot destruction, continuation with failed overall result, mail/MQTT opt-in and success gates, non-retained publishing and process-group timeout remain as supplied. Live ZFS destruction, production mail/MQTT/TLS and Home Assistant remain untested here. See `VERIFICATION.md` for exact results.
 
 ## 0.0.16 — 2026-10-26
 

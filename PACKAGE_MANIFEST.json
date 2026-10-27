@@ -1,22 +1,24 @@
 {
   "project": "CleanUpInSyncoidSnapshots",
-  "version": "0.0.16",
-  "verification_date": "2026-10-26",
+  "version": "0.0.19",
+  "preserved_executable_version": "0.0.16",
+  "verification_date": "2026-10-27",
   "original_archive": {
-    "filename": "CleanUpInSyncoidSnapshots-main.zip",
-    "sha256": "6f2b272f947e0536c5bc6f5c981c915b1eb76d715bddd50050aaeb89327b3c8d",
-    "file_count": 21
-  },
-  "previous_archive": {
-    "filename": "CleanUpInSyncoidSnapshots-0.0.15.zip",
-    "sha256": "5d614b288fd654a8372543f5293b70c37b4016b7bb3d273f72241538068ff3a9",
-    "version": "0.0.15",
+    "filename": "CleanUpInSyncoidSnapshots-CleanUpInSyncoidSnapshots-Next.zip",
+    "sha256": "294c6c831c8c468d1eb2b9299928c73bb725a3429c571acc9d74bedf2393db9a",
+    "source_version": "0.0.16",
     "file_count": 22
   },
-  "previous_comparison": {
-    "missing_paths": [],
-    "added_paths": [],
-    "modified_paths": [
+  "archive_root": "CleanUpInSyncoidSnapshots-0.0.19",
+  "packaged_file_count": 28,
+  "comparison": {
+    "counts": {
+      "unchanged": 11,
+      "modified": 11,
+      "added": 6
+    },
+    "missing_original_paths": [],
+    "modified_original_paths": [
       "CleanUpInSyncoidSnapshots.py",
       "PACKAGE_MANIFEST.json",
       "README.md",
@@ -24,37 +26,8 @@
       "VERSIONING.md",
       "commented_code_map.md",
       "config-example.toml",
-      "dist/CleanUpInSyncoidSnapshots",
-      "tests/test_project.py"
-    ],
-    "unchanged_paths": [
-      ".github/CODEOWNERS",
-      ".gitignore",
-      "CleanUpInSyncoidSnapshots.spec",
-      "DISCLAIMER.md",
-      "build-pyinstaller.sh",
       "config_loader.py",
-      "datasets-example",
       "home-assistant/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml",
-      "hostnames-example",
-      "mqtt_notifications.py",
-      "requirements-build.txt",
-      "requirements-mqtt.txt",
-      "requirements.txt"
-    ]
-  },
-  "archive_root": "CleanUpInSyncoidSnapshots-0.0.16",
-  "packaged_file_count": 22,
-  "comparison": {
-    "missing_original_paths": [],
-    "modified_original_paths": [
-      "CleanUpInSyncoidSnapshots.py",
-      "README.md",
-      "VERIFICATION.md",
-      "VERSIONING.md",
-      "commented_code_map.md",
-      "config-example.toml",
-      "dist/CleanUpInSyncoidSnapshots",
       "mqtt_notifications.py",
       "tests/test_project.py"
     ],
@@ -64,187 +37,611 @@
       "CleanUpInSyncoidSnapshots.spec",
       "DISCLAIMER.md",
       "build-pyinstaller.sh",
-      "config_loader.py",
       "datasets-example",
-      "home-assistant/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml",
+      "dist/CleanUpInSyncoidSnapshots",
       "hostnames-example",
       "requirements-build.txt",
       "requirements-mqtt.txt",
       "requirements.txt"
     ],
     "added_paths": [
-      "PACKAGE_MANIFEST.json"
+      "config.toml",
+      "live-preview-card.yaml",
+      "mqtt_reporting.py",
+      "success-failure-automation.yaml",
+      "tests/test_mqtt_reporting.py",
+      "versioning.md"
     ]
   },
-  "hash_note": "All payload files are listed below. PACKAGE_MANIFEST.json excludes its own hash/size to avoid circular metadata. The external SHA256SUMS-0.0.16.txt covers the whole ZIP.",
+  "permission_policy": "Preserve recorded original Unix permission modes; 0644 for regular data files with no recorded mode and 0755 for directories.",
+  "hash_note": "Original and release hashes use SHA-256. Manifest self-hash/size omitted; external archive checksum covers it.",
   "files": [
     {
       "path": ".github/CODEOWNERS",
-      "size": 11,
-      "mode": "0644",
-      "sha256": "8e348ed87081e5c65b05319836db22ddf974567a46dc45ae0d8b91a404c4b1c5",
-      "original_sha256": "8e348ed87081e5c65b05319836db22ddf974567a46dc45ae0d8b91a404c4b1c5",
-      "status": "unchanged"
+      "status": "unchanged",
+      "original": {
+        "size": 11,
+        "sha256": "8e348ed87081e5c65b05319836db22ddf974567a46dc45ae0d8b91a404c4b1c5",
+        "recorded_unix_mode": null
+      },
+      "release": {
+        "size": 11,
+        "sha256": "8e348ed87081e5c65b05319836db22ddf974567a46dc45ae0d8b91a404c4b1c5",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 11,
+        "sha256": "8e348ed87081e5c65b05319836db22ddf974567a46dc45ae0d8b91a404c4b1c5",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "unchanged"
     },
     {
       "path": ".gitignore",
-      "size": 323,
-      "mode": "0644",
-      "sha256": "c718a5f195bc7b3ad4767a2f56ed2809e6dd4252de3e1e7d89ca057bed8f1252",
-      "original_sha256": "c718a5f195bc7b3ad4767a2f56ed2809e6dd4252de3e1e7d89ca057bed8f1252",
-      "status": "unchanged"
+      "status": "unchanged",
+      "original": {
+        "size": 323,
+        "sha256": "c718a5f195bc7b3ad4767a2f56ed2809e6dd4252de3e1e7d89ca057bed8f1252",
+        "recorded_unix_mode": null
+      },
+      "release": {
+        "size": 323,
+        "sha256": "c718a5f195bc7b3ad4767a2f56ed2809e6dd4252de3e1e7d89ca057bed8f1252",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 323,
+        "sha256": "c718a5f195bc7b3ad4767a2f56ed2809e6dd4252de3e1e7d89ca057bed8f1252",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "unchanged"
     },
     {
       "path": "CleanUpInSyncoidSnapshots.py",
-      "size": 34991,
-      "mode": "0755",
-      "sha256": "87365b8de5cc0f698d05c872807d6ece64d4f9608d7675ba4cb3b5be111bcc85",
-      "original_sha256": "b9c2a811d946d439416be6ea82b6622961035afca589932053ae3ef4a75abe93",
-      "status": "modified"
+      "status": "modified",
+      "original": {
+        "size": 34991,
+        "sha256": "87365b8de5cc0f698d05c872807d6ece64d4f9608d7675ba4cb3b5be111bcc85",
+        "recorded_unix_mode": 493
+      },
+      "release": {
+        "size": 38457,
+        "sha256": "ece0893a18e2c819449784c194e6978339969ea653742691e644fbc110cbfba9",
+        "unix_mode": "0755"
+      },
+      "previous": {
+        "size": 38260,
+        "sha256": "234b27eda3a755a60935eb375b35b01c31e95663dade625f5aeb276e285870e3",
+        "recorded_unix_mode": 493
+      },
+      "previous_status": "modified"
     },
     {
       "path": "CleanUpInSyncoidSnapshots.spec",
-      "size": 948,
-      "mode": "0644",
-      "sha256": "e40fe64c2c0d72e6fbaa77e98d2c343d79ddf98582359a0ecac8b835d2f87409",
-      "original_sha256": "e40fe64c2c0d72e6fbaa77e98d2c343d79ddf98582359a0ecac8b835d2f87409",
-      "status": "unchanged"
+      "status": "unchanged",
+      "original": {
+        "size": 948,
+        "sha256": "e40fe64c2c0d72e6fbaa77e98d2c343d79ddf98582359a0ecac8b835d2f87409",
+        "recorded_unix_mode": null
+      },
+      "release": {
+        "size": 948,
+        "sha256": "e40fe64c2c0d72e6fbaa77e98d2c343d79ddf98582359a0ecac8b835d2f87409",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 948,
+        "sha256": "e40fe64c2c0d72e6fbaa77e98d2c343d79ddf98582359a0ecac8b835d2f87409",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "unchanged"
     },
     {
       "path": "DISCLAIMER.md",
-      "size": 1634,
-      "mode": "0644",
-      "sha256": "8d4d394f672efda9654d6bbae4fc031a2298e83928df9c4ec627401fb89a0e84",
-      "original_sha256": "8d4d394f672efda9654d6bbae4fc031a2298e83928df9c4ec627401fb89a0e84",
-      "status": "unchanged"
+      "status": "unchanged",
+      "original": {
+        "size": 1634,
+        "sha256": "8d4d394f672efda9654d6bbae4fc031a2298e83928df9c4ec627401fb89a0e84",
+        "recorded_unix_mode": null
+      },
+      "release": {
+        "size": 1634,
+        "sha256": "8d4d394f672efda9654d6bbae4fc031a2298e83928df9c4ec627401fb89a0e84",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 1634,
+        "sha256": "8d4d394f672efda9654d6bbae4fc031a2298e83928df9c4ec627401fb89a0e84",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "unchanged"
+    },
+    {
+      "path": "PACKAGE_MANIFEST.json",
+      "status": "modified",
+      "original": {
+        "size": 8755,
+        "sha256": "a35230090dccc505cec549abcb425dcf802588f06ee9a6b01e09d9b20169bcf4",
+        "recorded_unix_mode": null
+      },
+      "release": {
+        "size": null,
+        "sha256": null,
+        "unix_mode": "0644"
+      },
+      "note": "Self-hash and size omitted to avoid circular metadata; external ZIP SHA-256 covers this complete manifest.",
+      "previous": {
+        "size": 19246,
+        "sha256": "24198d5662b87693939b81ed00cc8c1f51ac3d0cc0045fcc39009ebe79a0fe28",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "modified"
     },
     {
       "path": "README.md",
-      "size": 25554,
-      "mode": "0644",
-      "sha256": "eabaec7c17f55c50f54cffbd110a456fc378628b99785bd5295508c5d6802276",
-      "original_sha256": "3de2e221f41b58cbc7cc9d480008a2aab65a328e86842fa185a371bc6c3cd007",
-      "status": "modified"
+      "status": "modified",
+      "original": {
+        "size": 25554,
+        "sha256": "eabaec7c17f55c50f54cffbd110a456fc378628b99785bd5295508c5d6802276",
+        "recorded_unix_mode": null
+      },
+      "release": {
+        "size": 30287,
+        "sha256": "4aa78b25768b60cee4ab0ebac801b97ea770f5fb9ac27c2549213c57cf6d9377",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 29623,
+        "sha256": "fb32bfc644a357a069f2bd6919c516e7cfb0923c57291274e08801b06f5d796a",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "modified"
     },
     {
       "path": "VERIFICATION.md",
-      "size": 6945,
-      "mode": "0644",
-      "sha256": "1fa3295c96a8423d0f8ba840ae501d4bf4b3b386025a0871aecc94d4f520bcb6",
-      "original_sha256": "74e1caf660bf09e9a87c8a8263b33d36cc799fe68bd40f6d1b0ef0cdce5a79cd",
-      "status": "modified"
+      "status": "modified",
+      "original": {
+        "size": 6945,
+        "sha256": "1fa3295c96a8423d0f8ba840ae501d4bf4b3b386025a0871aecc94d4f520bcb6",
+        "recorded_unix_mode": null
+      },
+      "release": {
+        "size": 5837,
+        "sha256": "80aef6fb14f2d4238a87366ac9741d5f1bedaded98a1522d93aa34ca52098f83",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 11064,
+        "sha256": "29016967b3f7a0bbef548d5e9f7c0dfef5d04bc10c31640383ba4a7860fa7195",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "modified"
     },
     {
       "path": "VERSIONING.md",
-      "size": 35487,
-      "mode": "0644",
-      "sha256": "3a57fa166bd8b8d0c56237053a1578ba4a4efbcb4999dfa32ad2ddf79ce48423",
-      "original_sha256": "acc491af249a62b696ee4c68776e1d0de4ff333c0454b70b9e384978beb24c22",
-      "status": "modified"
+      "status": "modified",
+      "original": {
+        "size": 35487,
+        "sha256": "3a57fa166bd8b8d0c56237053a1578ba4a4efbcb4999dfa32ad2ddf79ce48423",
+        "recorded_unix_mode": null
+      },
+      "release": {
+        "size": 45007,
+        "sha256": "c23300f740b998bc789acc889f88fb1a5428fb166813b60237553b3ac720f27a",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 42633,
+        "sha256": "69be13d18bb7fec98f5bd28b646b66166b228338a489cebaaca68f819ea0af33",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "modified"
     },
     {
       "path": "build-pyinstaller.sh",
-      "size": 1370,
-      "mode": "0755",
-      "sha256": "2c36da8432709fdcfd48df35c100f47abc3fadf47aeeb9af741f7f9eebbf6f96",
-      "original_sha256": "2c36da8432709fdcfd48df35c100f47abc3fadf47aeeb9af741f7f9eebbf6f96",
-      "status": "unchanged"
+      "status": "unchanged",
+      "original": {
+        "size": 1370,
+        "sha256": "2c36da8432709fdcfd48df35c100f47abc3fadf47aeeb9af741f7f9eebbf6f96",
+        "recorded_unix_mode": 493
+      },
+      "release": {
+        "size": 1370,
+        "sha256": "2c36da8432709fdcfd48df35c100f47abc3fadf47aeeb9af741f7f9eebbf6f96",
+        "unix_mode": "0755"
+      },
+      "previous": {
+        "size": 1370,
+        "sha256": "2c36da8432709fdcfd48df35c100f47abc3fadf47aeeb9af741f7f9eebbf6f96",
+        "recorded_unix_mode": 493
+      },
+      "previous_status": "unchanged"
     },
     {
       "path": "commented_code_map.md",
-      "size": 35208,
-      "mode": "0644",
-      "sha256": "d51fac44d05418a6c7adf6ad13f2b23477e74b03d8a0dbbbf626c20066f1c04b",
-      "original_sha256": "069861339cfb47df57f7bdace9fd5668526e94e526507115b10effd950c47eeb",
-      "status": "modified"
+      "status": "modified",
+      "original": {
+        "size": 35208,
+        "sha256": "d51fac44d05418a6c7adf6ad13f2b23477e74b03d8a0dbbbf626c20066f1c04b",
+        "recorded_unix_mode": null
+      },
+      "release": {
+        "size": 63426,
+        "sha256": "1d307ce50a4ca94b0db7f8800e2320cd7f16cb82392456623f0aa953281bd419",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 61520,
+        "sha256": "33b95870b7d6f6be6283d4b576104601b7617279c2dbcc1632a683558ec89516",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "modified"
     },
     {
       "path": "config-example.toml",
-      "size": 5156,
-      "mode": "0644",
-      "sha256": "ba47b18b5ef601e9cc256d2046df3cef537826722672e901cff613856e3edc6f",
-      "original_sha256": "3ae55ce854fcd90ef89ee24c5e6c5be8d318671166df25f927f021439cab7c38",
-      "status": "modified"
+      "status": "modified",
+      "original": {
+        "size": 5156,
+        "sha256": "ba47b18b5ef601e9cc256d2046df3cef537826722672e901cff613856e3edc6f",
+        "recorded_unix_mode": null
+      },
+      "release": {
+        "size": 8210,
+        "sha256": "69b9d0536365b9cd0c2ce5fe0d9c88c6c33e18e02b425bf7f6ca1775d331c902",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 7901,
+        "sha256": "e8e453a2e31b0707d77fb4fba57fa0d21a6e757792aa2a79e638f078cd0b6334",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "modified"
+    },
+    {
+      "path": "config.toml",
+      "status": "added",
+      "original": null,
+      "release": {
+        "size": 8210,
+        "sha256": "69b9d0536365b9cd0c2ce5fe0d9c88c6c33e18e02b425bf7f6ca1775d331c902",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 7901,
+        "sha256": "e8e453a2e31b0707d77fb4fba57fa0d21a6e757792aa2a79e638f078cd0b6334",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "modified"
     },
     {
       "path": "config_loader.py",
-      "size": 7942,
-      "mode": "0644",
-      "sha256": "15c418f121d2dde996f57e803657fb633be45b7167f9760d9fb2a32508091d9c",
-      "original_sha256": "15c418f121d2dde996f57e803657fb633be45b7167f9760d9fb2a32508091d9c",
-      "status": "unchanged"
+      "status": "modified",
+      "original": {
+        "size": 7942,
+        "sha256": "15c418f121d2dde996f57e803657fb633be45b7167f9760d9fb2a32508091d9c",
+        "recorded_unix_mode": null
+      },
+      "release": {
+        "size": 8065,
+        "sha256": "a4df5f8fe6b278d61d156ab9b524b71327f0a1fad3f24987b0d9dfe5a5b41a88",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 8065,
+        "sha256": "a4df5f8fe6b278d61d156ab9b524b71327f0a1fad3f24987b0d9dfe5a5b41a88",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "unchanged"
     },
     {
       "path": "datasets-example",
-      "size": 1054,
-      "mode": "0644",
-      "sha256": "afeaec89f456aaf097fae94940d327a56cdabd5ade8b8c5908dc6fcb29a036ce",
-      "original_sha256": "afeaec89f456aaf097fae94940d327a56cdabd5ade8b8c5908dc6fcb29a036ce",
-      "status": "unchanged"
+      "status": "unchanged",
+      "original": {
+        "size": 1054,
+        "sha256": "afeaec89f456aaf097fae94940d327a56cdabd5ade8b8c5908dc6fcb29a036ce",
+        "recorded_unix_mode": null
+      },
+      "release": {
+        "size": 1054,
+        "sha256": "afeaec89f456aaf097fae94940d327a56cdabd5ade8b8c5908dc6fcb29a036ce",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 1054,
+        "sha256": "afeaec89f456aaf097fae94940d327a56cdabd5ade8b8c5908dc6fcb29a036ce",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "unchanged"
     },
     {
       "path": "dist/CleanUpInSyncoidSnapshots",
-      "size": 12292528,
-      "mode": "0755",
-      "sha256": "e4b450b7ad507dde5d10a733de620dfd80867fe32eb9677ec55f40d2fb9647b7",
-      "original_sha256": "94f9860f50f8e2eb8466bd4baee828dd4b87d68843b849888c796f78334bbc0d",
-      "status": "modified"
+      "status": "unchanged",
+      "original": {
+        "size": 12292528,
+        "sha256": "e4b450b7ad507dde5d10a733de620dfd80867fe32eb9677ec55f40d2fb9647b7",
+        "recorded_unix_mode": 493
+      },
+      "release": {
+        "size": 12292528,
+        "sha256": "e4b450b7ad507dde5d10a733de620dfd80867fe32eb9677ec55f40d2fb9647b7",
+        "unix_mode": "0755"
+      },
+      "previous": {
+        "size": 12292528,
+        "sha256": "e4b450b7ad507dde5d10a733de620dfd80867fe32eb9677ec55f40d2fb9647b7",
+        "recorded_unix_mode": 493
+      },
+      "previous_status": "unchanged"
     },
     {
       "path": "home-assistant/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml",
-      "size": 7176,
-      "mode": "0644",
-      "sha256": "625cc542dce00dec2fc7fb2f4b0ca7f7c4d98ecd0a20dc662db2975878f5c1ab",
-      "original_sha256": "625cc542dce00dec2fc7fb2f4b0ca7f7c4d98ecd0a20dc662db2975878f5c1ab",
-      "status": "unchanged"
+      "status": "modified",
+      "original": {
+        "size": 7176,
+        "sha256": "625cc542dce00dec2fc7fb2f4b0ca7f7c4d98ecd0a20dc662db2975878f5c1ab",
+        "recorded_unix_mode": null
+      },
+      "release": {
+        "size": 7179,
+        "sha256": "caf4259aa6c9f16527a0ff68a713b5e38391ecd9bb11b4105d933d141da46f50",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 7179,
+        "sha256": "caf4259aa6c9f16527a0ff68a713b5e38391ecd9bb11b4105d933d141da46f50",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "unchanged"
     },
     {
       "path": "hostnames-example",
-      "size": 19,
-      "mode": "0644",
-      "sha256": "00d17509cb7ac0f28cc8eb032d7bd43f95fcfdbe32218aeab70fd1632d65b145",
-      "original_sha256": "00d17509cb7ac0f28cc8eb032d7bd43f95fcfdbe32218aeab70fd1632d65b145",
-      "status": "unchanged"
+      "status": "unchanged",
+      "original": {
+        "size": 19,
+        "sha256": "00d17509cb7ac0f28cc8eb032d7bd43f95fcfdbe32218aeab70fd1632d65b145",
+        "recorded_unix_mode": null
+      },
+      "release": {
+        "size": 19,
+        "sha256": "00d17509cb7ac0f28cc8eb032d7bd43f95fcfdbe32218aeab70fd1632d65b145",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 19,
+        "sha256": "00d17509cb7ac0f28cc8eb032d7bd43f95fcfdbe32218aeab70fd1632d65b145",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "unchanged"
+    },
+    {
+      "path": "live-preview-card.yaml",
+      "status": "added",
+      "original": null,
+      "release": {
+        "size": 10059,
+        "sha256": "8056fb882bf376eae349ec4a3bf3c8d57d944158adce3a9b77cd34670b1f7287",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 9734,
+        "sha256": "4536985c19bbb20885b9f0ef58431d39dcfec7abb16f628698f3801085dc19fb",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "modified"
     },
     {
       "path": "mqtt_notifications.py",
-      "size": 8282,
-      "mode": "0644",
-      "sha256": "87d90b0665f9189f7d05fb0ba2ef567583cf822794d28cef54facd50ce647b00",
-      "original_sha256": "a540a3a128414320676612fa314538c0ec3dc4ff04ea1b03b261a6a22af54672",
-      "status": "modified"
+      "status": "modified",
+      "original": {
+        "size": 8282,
+        "sha256": "87d90b0665f9189f7d05fb0ba2ef567583cf822794d28cef54facd50ce647b00",
+        "recorded_unix_mode": null
+      },
+      "release": {
+        "size": 8777,
+        "sha256": "befc3735c9f5cbc56dca7ddb66b1d703d314182289ca1bdf2a8aba7894dc6660",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 8744,
+        "sha256": "aaadcf4bd7550886a4728b41369d5f04c312d3ed5d137a729d2e87c2a526019e",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "modified"
+    },
+    {
+      "path": "mqtt_reporting.py",
+      "status": "added",
+      "original": null,
+      "release": {
+        "size": 43545,
+        "sha256": "5b62ca9eea7e03942bfd6e2bb225802b1f3618a5bb879b6e2692fcbb9f16f7c1",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 42732,
+        "sha256": "b0d395ee895725f783417754da240dd47d389f2d422b60afe4b9ef016fd10640",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "modified"
     },
     {
       "path": "requirements-build.txt",
-      "size": 274,
-      "mode": "0644",
-      "sha256": "8b806fd2e81f69538c070be754632cffbd942135d30138ec81bd0f5bda39d57e",
-      "original_sha256": "8b806fd2e81f69538c070be754632cffbd942135d30138ec81bd0f5bda39d57e",
-      "status": "unchanged"
+      "status": "unchanged",
+      "original": {
+        "size": 274,
+        "sha256": "8b806fd2e81f69538c070be754632cffbd942135d30138ec81bd0f5bda39d57e",
+        "recorded_unix_mode": null
+      },
+      "release": {
+        "size": 274,
+        "sha256": "8b806fd2e81f69538c070be754632cffbd942135d30138ec81bd0f5bda39d57e",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 274,
+        "sha256": "8b806fd2e81f69538c070be754632cffbd942135d30138ec81bd0f5bda39d57e",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "unchanged"
     },
     {
       "path": "requirements-mqtt.txt",
-      "size": 140,
-      "mode": "0644",
-      "sha256": "e9712475edb341c4595620756ae5dcd1515e9501cf8b006864ad30b50988ee84",
-      "original_sha256": "e9712475edb341c4595620756ae5dcd1515e9501cf8b006864ad30b50988ee84",
-      "status": "unchanged"
+      "status": "unchanged",
+      "original": {
+        "size": 140,
+        "sha256": "e9712475edb341c4595620756ae5dcd1515e9501cf8b006864ad30b50988ee84",
+        "recorded_unix_mode": null
+      },
+      "release": {
+        "size": 140,
+        "sha256": "e9712475edb341c4595620756ae5dcd1515e9501cf8b006864ad30b50988ee84",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 140,
+        "sha256": "e9712475edb341c4595620756ae5dcd1515e9501cf8b006864ad30b50988ee84",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "unchanged"
     },
     {
       "path": "requirements.txt",
-      "size": 124,
-      "mode": "0644",
-      "sha256": "93cd68b15bf49a279295513ab41af0c0dd611d264c28e26383f21c6195208721",
-      "original_sha256": "93cd68b15bf49a279295513ab41af0c0dd611d264c28e26383f21c6195208721",
-      "status": "unchanged"
+      "status": "unchanged",
+      "original": {
+        "size": 124,
+        "sha256": "93cd68b15bf49a279295513ab41af0c0dd611d264c28e26383f21c6195208721",
+        "recorded_unix_mode": null
+      },
+      "release": {
+        "size": 124,
+        "sha256": "93cd68b15bf49a279295513ab41af0c0dd611d264c28e26383f21c6195208721",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 124,
+        "sha256": "93cd68b15bf49a279295513ab41af0c0dd611d264c28e26383f21c6195208721",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "unchanged"
+    },
+    {
+      "path": "success-failure-automation.yaml",
+      "status": "added",
+      "original": null,
+      "release": {
+        "size": 3671,
+        "sha256": "c3c6d834f56d76c4cd973b6415276066acafd144db1fad34cbdf220b4c4ba98f",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 3671,
+        "sha256": "c3c6d834f56d76c4cd973b6415276066acafd144db1fad34cbdf220b4c4ba98f",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "unchanged"
+    },
+    {
+      "path": "tests/test_mqtt_reporting.py",
+      "status": "added",
+      "original": null,
+      "release": {
+        "size": 56019,
+        "sha256": "3483dc87007f705e44ac29f73a7d912417b9dd90c31a828212b675feb0772c23",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 50695,
+        "sha256": "c902d5612aa75a7e648831f8e9b8e5610126dfd4627e9c9c6bff31ef91f5cb60",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "modified"
     },
     {
       "path": "tests/test_project.py",
-      "size": 53982,
-      "mode": "0644",
-      "sha256": "f28ae8a42e25acb532e43681ee5b39702e9fa2c80bf955ab76b43d437a723e9a",
-      "original_sha256": "e07093701442baf573653bf7caa5dfba93d7708a3d843bde2b0d124817d6bc62",
-      "status": "modified"
+      "status": "modified",
+      "original": {
+        "size": 53982,
+        "sha256": "f28ae8a42e25acb532e43681ee5b39702e9fa2c80bf955ab76b43d437a723e9a",
+        "recorded_unix_mode": null
+      },
+      "release": {
+        "size": 54377,
+        "sha256": "fc6ba003594fdcc1043359fb07a1408be89ad458cd7d78ed6866ad7396367d79",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 54377,
+        "sha256": "fc6ba003594fdcc1043359fb07a1408be89ad458cd7d78ed6866ad7396367d79",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "unchanged"
+    },
+    {
+      "path": "versioning.md",
+      "status": "added",
+      "original": null,
+      "release": {
+        "size": 45007,
+        "sha256": "c23300f740b998bc789acc889f88fb1a5428fb166813b60237553b3ac720f27a",
+        "unix_mode": "0644"
+      },
+      "previous": {
+        "size": 42633,
+        "sha256": "69be13d18bb7fec98f5bd28b646b66166b228338a489cebaaca68f819ea0af33",
+        "recorded_unix_mode": 420
+      },
+      "previous_status": "modified"
     }
-  ]
+  ],
+  "previous_archive": {
+    "filename": "CleanUpInSyncoidSnapshots-0.0.18.zip",
+    "sha256": "34313f97025207efb67a6557941669244e618a29fd249e726102e88efb6f2012",
+    "version": "0.0.18",
+    "file_count": 28
+  },
+  "previous_comparison": {
+    "counts": {
+      "unchanged": 15,
+      "modified": 13
+    },
+    "missing_paths": [],
+    "modified_paths": [
+      "CleanUpInSyncoidSnapshots.py",
+      "PACKAGE_MANIFEST.json",
+      "README.md",
+      "VERIFICATION.md",
+      "VERSIONING.md",
+      "commented_code_map.md",
+      "config-example.toml",
+      "config.toml",
+      "live-preview-card.yaml",
+      "mqtt_notifications.py",
+      "mqtt_reporting.py",
+      "tests/test_mqtt_reporting.py",
+      "versioning.md"
+    ],
+    "unchanged_paths": [
+      ".github/CODEOWNERS",
+      ".gitignore",
+      "CleanUpInSyncoidSnapshots.spec",
+      "DISCLAIMER.md",
+      "build-pyinstaller.sh",
+      "config_loader.py",
+      "datasets-example",
+      "dist/CleanUpInSyncoidSnapshots",
+      "home-assistant/CleanUpInSyncoidSnapshots-mqtt-persistent-notification.yaml",
+      "hostnames-example",
+      "requirements-build.txt",
+      "requirements-mqtt.txt",
+      "requirements.txt",
+      "success-failure-automation.yaml",
+      "tests/test_project.py"
+    ],
+    "added_paths": []
+  },
+  "template_archive": {
+    "filename": "syncerate-mqtt-template.zip",
+    "sha256": "315211cd55e8cf2062c83993ea0b57336c4ad62d589fafd4e68798292b227409"
+  }
 }
